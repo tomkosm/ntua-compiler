@@ -4,6 +4,7 @@
 #include <iostream>
 #include <vector>
 #include <map>
+#include <deque>
 
 #include "symbol.hpp"
 
@@ -653,6 +654,7 @@ class ExprList : public Expr {
     for (Expr *d : expr_list) delete d;
   }
   void add(Expr *d) { expr_list.push_back(d); }
+  void add_front(Expr *d) { expr_list.push_front(d); }
 
   void printAST(std::ostream &out) const override {
     out << "ExprList(";
@@ -667,7 +669,7 @@ class ExprList : public Expr {
   }
 
   private:
-    std::vector<Expr *> expr_list;
+    std::deque<Expr *> expr_list;
 };
 
 class FuncCall : public Stmt, public Expr {
