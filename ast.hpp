@@ -7,16 +7,31 @@
 #include <deque>
 
 #include "symbol.hpp"
-
+#include "scope.cpp"
 
 #include <string>
 
-using namespace std;
+
+
+
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/LegacyPassManager.h>
+#include <llvm/IR/Value.h>
+#include <llvm/IR/Verifier.h>
+#include <llvm/Transforms/InstCombine/InstCombine.h>
+#include <llvm/Transforms/Scalar.h>
+#include <llvm/Transforms/Scalar/GVN.h>
+#include <llvm/Transforms/Utils.h>
+
+using namespace llvm;
+
+
+
 
 extern std::vector<int> rt_stack;
 
 
-enum Type 
+enum DataType 
 {   TYPE_int, 
     TYPE_char, 
     TYPE_nothing
@@ -25,11 +40,118 @@ enum Type
 class AST {
  public:
   virtual ~AST() = default;
-  virtual void sem() {};
   virtual void printAST(std::ostream &out) const = 0;
+  virtual Value* compile() const { return nullptr; }
+  virtual Value* compile()  { return nullptr; }
+
+
+  void llvm_compile_and_dump(bool optimize=false) {
+    // Initialize
+    TheModule = std::make_unique<Module>("Grace", TheContext);
+    TheFPM = std::make_unique<legacy::FunctionPassManager>(TheModule.get());
+    if (optimize) {
+      TheFPM->add(createPromoteMemoryToRegisterPass());
+      TheFPM->add(createInstructionCombiningPass());
+      TheFPM->add(createReassociatePass());
+      TheFPM->add(createGVNPass());
+      TheFPM->add(createCFGSimplificationPass());
+    }
+    TheFPM->doInitialization();
+    // Initialize types
+    i8 = IntegerType::get(TheContext, 8);
+    i32 = IntegerType::get(TheContext, 32);
+    i64 = IntegerType::get(TheContext, 64);
+ 
+    // Initialize global variables
+    ArrayType *vars_type = ArrayType::get(i32, 26);
+    TheVars = new GlobalVariable(
+      *TheModule, vars_type, false, GlobalValue::PrivateLinkage,
+      ConstantAggregateZero::get(vars_type), "vars");
+    TheVars->setAlignment(MaybeAlign(16));
+    ArrayType *nl_type = ArrayType::get(i8, 2);
+    TheNL = new GlobalVariable(
+      *TheModule, nl_type, true, GlobalValue::PrivateLinkage,
+      ConstantArray::get(nl_type, {c8('\n'), c8('\0')}), "nl");
+    TheNL->setAlignment(MaybeAlign(1));
+ 
+    // Initialize library functions
+    FunctionType *writeInteger_type =
+      FunctionType::get(Type::getVoidTy(TheContext), {i64}, false);
+    TheWriteInteger =
+      Function::Create(writeInteger_type, Function::ExternalLinkage,
+                       "writeInteger", TheModule.get());
+    FunctionType *writeString_type =
+      FunctionType::get(Type::getVoidTy(TheContext),
+                        {PointerType::get(i8, 0)}, false);
+    TheWriteString =
+      Function::Create(writeString_type, Function::ExternalLinkage,
+                       "writeString", TheModule.get());
+
+    // Define and start the main function.
+    FunctionType *main_type = FunctionType::get(i32, {}, false);
+    Function *main =
+      Function::Create(main_type, Function::ExternalLinkage,
+                       "main", TheModule.get());
+    BasicBlock *BB = BasicBlock::Create(TheContext, "entry", main);
+    Builder.SetInsertPoint(BB);
+
+    // Emit the program code.
+    compile();
+
+    std::cout << "Compiled!" << std::endl;
+
+    Builder.SetInsertPoint(BB);
+    Builder.CreateRet(c32(0));
+
+    // Verify the IR.
+    bool bad = verifyModule(*TheModule, &errs());
+    if (bad) {
+      std::cerr << "The IR is bad!" << std::endl;
+      TheModule->print(errs(), nullptr);
+      std::exit(1);
+    }
+
+    // Optimize!
+    TheFPM->run(*main);
+
+    // Print out the IR.
+    TheModule->print(outs(), nullptr);
+  }
+
+ public:
+  static ScopeTracker scope; //maybe some special class to do this?
+
+
+
+ protected:
+  static LLVMContext TheContext;
+  static IRBuilder<> Builder;
+  static std::unique_ptr<Module> TheModule;
+  static std::unique_ptr<legacy::FunctionPassManager> TheFPM;
+
+  static GlobalVariable *TheVars;
+  static GlobalVariable *TheNL;
+  static Function *TheWriteInteger;
+  static Function *TheWriteString;
+
+  static Type *i8;
+  static Type *i32;
+  static Type *i64;
+
+  static ConstantInt* c8(char c) {
+    return ConstantInt::get(TheContext, APInt(8, c, true));
+  }
+  static ConstantInt* c32(int n) {
+    return ConstantInt::get(TheContext, APInt(32, n, true));
+  }
+
+
+
+
 };
 
-inline std::ostream &operator<<(std::ostream &out, Type t) {
+
+inline std::ostream &operator<<(std::ostream &out, DataType t) {
   switch (t) {
     case TYPE_int:  out << "int";  break;
     case TYPE_char: out << "char"; break;
@@ -47,13 +169,15 @@ inline std::ostream &operator<<(std::ostream &out, const AST &ast) {
 
 class Id : public AST {
  public:
-  Id(string *c): var(*c) {}
+  Id(std::string *c): var(*c) {}
   void printAST(std::ostream &out) const override {
     out << "Id(" << var << ")";
   }
 
+  std::string getName() const { return var; }
+
  private:
-  string var;
+  std::string var;
   int offset;
 };
 
@@ -77,6 +201,10 @@ class IdList : public AST {
 
     out << ")";
   }
+
+    std::vector<Id *> getIds() const { return id_list; }
+
+
   private:
     std::vector<Id *> id_list;
 };
@@ -101,13 +229,12 @@ class Expr : public AST {
     out << "Expr(empty)";
   }
 
-  void check_type(Type t) {
-    sem();
-    if (type != t) yyerror("Type mismatch");
-  }
+  // void check_type(DataType t) {
+  //   if (type != t) yyerror("Type mismatch");
+  // }
 //   virtual int eval() const = 0;
  protected:
-  Type type;
+  DataType type;
 };
 
 
@@ -139,10 +266,10 @@ class ArraySize : public Stmt {
 
 class TypeDef : public Stmt {
  public:
-  TypeDef(Type t, ArraySize *s): type(t), array_size(s) {}
+  TypeDef(DataType t, ArraySize *s): type(t), array_size(s) {}
 
   void printAST(std::ostream &out) const override {
-    out << "TypeDef(" << type << ", " << array_size << ")";
+    out << "TypeDef(" << type << ", " << *array_size << ")";
   }
 //   void allocate() const {
 //     rt_stack.push_back(0);
@@ -151,7 +278,7 @@ class TypeDef : public Stmt {
 //     rt_stack.pop_back();
 //   }
  private:
-  Type type;
+  DataType type;
   ArraySize *array_size;
 };
 
@@ -165,14 +292,20 @@ class VarDec : public Stmt {
   VarDec(IdList *i, TypeDef *t): id_list(i), type(t) {}
 
   void printAST(std::ostream &out) const override {
-    out << "VarDec(" << id_list << ": " << type << ")";
+    out << "VarDec(" << *id_list << ": " << *type << ")";
   }
-//   void allocate() const {
-//     rt_stack.push_back(0);
-//   }
-//   void deallocate() const {
-//     rt_stack.pop_back();
-//   }
+
+  Value* compile() const override {
+
+
+    std::string name = id_list->getIds()[0]->getName();
+
+    std::cout << "name: " << name << std::endl; 
+
+    return nullptr;
+  }
+
+
  private:
   IdList *id_list;
   TypeDef *type;
@@ -239,14 +372,15 @@ class Assign : public Stmt {
   void printAST(std::ostream &out) const override {
     out << "Assign(" << *var << ", " << *expr << ")";
   }
-//   void sem() override {
-//     STEntry *e = st.lookup(var);
-//     expr->check_type(e->type);
-//     offset = e->offset;
+  
+//   Value* compile() const override {
+//     char name[] = { var, '_', 'p', 't', 'r', '\0' };
+//     Value *lhs = Builder.CreateGEP(TheVars, {c32(0), c32(var - 'a')}, name);
+//     Value *rhs = expr->compile();
+//     Builder.CreateStore(rhs, lhs);
+//     return nullptr;
 //   }
-//   void execute() const override {
-//     rt_stack[offset] = expr->eval();
-//   }
+
  private:
   Lvalue *var;
   Expr *expr;
@@ -367,7 +501,7 @@ class StmtList : public Stmt {
 class BinOp : public Expr {
     //also take care of conds 
  public:
-  BinOp(Expr *e1, string *s, Expr *e2) : expr1(e1), op(*s), expr2(e2) {}
+  BinOp(Expr *e1, std::string *s, Expr *e2) : expr1(e1), op(*s), expr2(e2) {}
   ~BinOp() { delete expr1; delete expr2; }
   void printAST(std::ostream &out) const override {
     out << "BinOp(" << *expr1 << ", " << op << ", " << *expr2 << ")";
@@ -399,14 +533,14 @@ class BinOp : public Expr {
 //   }
  private:
   Expr *expr1;
-  string op;
+  std::string op;
   Expr *expr2;
 };
 
 
 class UnaryOp : public Expr {
  public:
-  UnaryOp(Expr *e1, string *s) : expr1(e1), var(*s){}
+  UnaryOp(Expr *e1, std::string *s) : expr1(e1), var(*s){}
   ~UnaryOp() { delete expr1; }
   void printAST(std::ostream &out) const override {
     out << "UnaryOp("<< var<< ", " << *expr1 << ")";
@@ -425,7 +559,7 @@ class UnaryOp : public Expr {
 //   }
  private:
   Expr *expr1;
-  string var;
+  std::string var;
 };
 
 class Ref : public Stmt {
@@ -449,7 +583,7 @@ class Ref : public Stmt {
 
 class FparType : public Stmt {
  public:
-  FparType(Type t, bool e, ArraySize *a) : type(t),arrySizeEmpty(e),array_size(a) {}
+  FparType(DataType t, bool e, ArraySize *a) : type(t),arrySizeEmpty(e),array_size(a) {}
   ~FparType() {
     delete array_size;
   }
@@ -461,7 +595,7 @@ class FparType : public Stmt {
 
   private:
 
-    Type type;
+    DataType type;
     bool arrySizeEmpty;
 
     ArraySize *array_size;
@@ -471,7 +605,7 @@ class FparType : public Stmt {
 
 class FparDef : public Stmt {
  public:
-  FparDef(Ref *r,string *t,IdList *i,FparType *ft) : ref(r),Tid(*t),id_list(i),fpar_type(ft) {}
+  FparDef(Ref *r,std::string *t,IdList *i,FparType *ft) : ref(r),Tid(*t),id_list(i),fpar_type(ft) {}
   ~FparDef() {
     delete ref; delete id_list; delete fpar_type;
   }
@@ -483,7 +617,7 @@ class FparDef : public Stmt {
 
   private:
     Ref *ref;
-    string Tid;
+    std::string Tid;
     IdList *id_list;
     FparType *fpar_type;
 
@@ -521,7 +655,7 @@ class FparDefList : public Stmt {
 
 class FunctionHeader : public Stmt {
  public:
-  FunctionHeader(string *s,FparDefList *f,Type t) : Tid(*s),fpardef_list(f),type(t) {}
+  FunctionHeader(std::string *s,FparDefList *f,DataType t) : Tid(*s),fpardef_list(f),type(t) {}
   ~FunctionHeader() {
     delete fpardef_list;
   }
@@ -531,10 +665,10 @@ class FunctionHeader : public Stmt {
     out << "FunctionHeader("<< Tid<< ", " << *fpardef_list << ", " << type << ")";
   }
 
-  private:
-    string Tid;
+  public:
+    std::string Tid;
     FparDefList *fpardef_list;
-    Type type;
+    DataType type;
 
 };
 
@@ -558,6 +692,15 @@ class LocalDefList : public Stmt {
 
     out << ")";
   }
+    Value* compile() const override {
+    
+
+        for(const auto &d : localdef_list) {
+            d->compile();
+        }
+
+        return nullptr;
+    }
 
   private:
     std::vector<Stmt *> localdef_list;
@@ -571,6 +714,47 @@ class FunctionDef : public Stmt {
   FunctionDef(FunctionHeader *h,LocalDefList *l,StmtList *s) : header(h),localdef_list(l),stmt_list(s) {}
   ~FunctionDef() {
     delete localdef_list; delete stmt_list; delete header;
+  }
+
+  Value* compile() override {
+
+
+    // Make the function type:  double(double,double) etc.
+
+
+    Type *voidType = Type::getVoidTy(TheContext);
+
+    FunctionType *FT = FunctionType::get(voidType,{},false);
+
+
+
+    Function *F = Function::Create(FT, Function::ExternalLinkage, header->Tid,TheModule.get());
+
+    BasicBlock *BB = BasicBlock::Create(TheContext, header->Tid, F);
+    Builder.SetInsertPoint(BB);
+
+
+    scope.addScope(header->Tid); //add the name in scope 
+    std::cout << "Current Scope: " <<  scope.getCurrentScope() << std::endl;
+
+
+    localdef_list->compile();
+
+    scope.removeScope(); //remove the name from scope
+
+
+
+    stmt_list->compile();
+
+
+    Builder.CreateRetVoid();
+
+
+
+    return nullptr;
+
+
+
   }
 
 
@@ -600,7 +784,7 @@ class Cond : public Expr {
 class BinOpCond : public Cond {
     //also take care of conds 
  public:
-  BinOpCond(Expr *e1, string *s, Expr *e2) : expr1(e1), op(*s), expr2(e2) {}
+  BinOpCond(Expr *e1, std::string *s, Expr *e2) : expr1(e1), op(*s), expr2(e2) {}
   ~BinOpCond() { delete expr1; delete expr2; }
   void printAST(std::ostream &out) const override {
     out << "BinOpCond("<< op<< ", " << *expr1 << ", " << *expr2 << ")";
@@ -609,7 +793,7 @@ class BinOpCond : public Cond {
 
  private:
   Expr *expr1;
-  string op;
+  std::string op;
   Expr *expr2;
 };
 
@@ -617,7 +801,7 @@ class BinOpCond : public Cond {
 class CompareOp : public Cond {
     //also take care of conds 
  public:
-  CompareOp(Expr *e1, string *s, Expr *e2) : expr1(e1), op(*s), expr2(e2) {}
+  CompareOp(Expr *e1, std::string *s, Expr *e2) : expr1(e1), op(*s), expr2(e2) {}
   ~CompareOp() { delete expr1; delete expr2; }
   void printAST(std::ostream &out) const override {
     out << "CompareOp("<< op<< ", " << *expr1 << ", " << *expr2 << ")";
@@ -625,7 +809,7 @@ class CompareOp : public Cond {
 
  private:
   Expr *expr1;
-  string op;
+  std::string op;
   Expr *expr2;
 };
 
@@ -633,7 +817,7 @@ class CompareOp : public Cond {
 class UnaryOpCond : public Cond {
     //also take care of conds 
  public:
-  UnaryOpCond(Expr *e1, string *s) : expr1(e1), op(*s) {}
+  UnaryOpCond(Expr *e1, std::string *s) : expr1(e1), op(*s) {}
   ~UnaryOpCond() { delete expr1; }
   void printAST(std::ostream &out) const override {
     out << "UnaryOpCond("<< op<< ", " << *expr1 << ")";
@@ -641,7 +825,7 @@ class UnaryOpCond : public Cond {
 
  private:
   Expr *expr1;
-  string op;
+  std::string op;
 };
 
 
@@ -674,7 +858,7 @@ class ExprList : public Expr {
 
 class FuncCall : public Stmt, public Expr {
  public:
-  FuncCall(string *s, ExprList *e): id(*s),expr_list(e) {}
+  FuncCall(std::string *s, ExprList *e): id(*s),expr_list(e) {}
   ~FuncCall() {
         delete expr_list;
   }
@@ -683,7 +867,7 @@ class FuncCall : public Stmt, public Expr {
   }
 
  private:
-  string id;
+  std::string id;
   ExprList *expr_list;
   
   int offset;
@@ -711,14 +895,14 @@ class IntConst : public Expr {
 
 class IdLval : public Lvalue {
  public:
-  IdLval(string *c) : var(*c) {}
+  IdLval(std::string *c) : var(*c) {}
   void printAST(std::ostream &out) const override {
     out << "Id(" << var << ")";
   }
 
 
  private:
-  string var;
+  std::string var;
   int offset;
 };
 
@@ -726,13 +910,13 @@ class IdLval : public Lvalue {
 
 class StringConst : public Lvalue {
  public:
-  StringConst(string *s) : var(*s) {}
+  StringConst(std::string *s) : var(*s) {}
   void printAST(std::ostream &out) const override {
     out << "StringConst(" << var << ")";
   }
 
  private:
-  string var;
+  std::string var;
 };
 
 
