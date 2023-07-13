@@ -6,8 +6,7 @@
 #include <map>
 #include <deque>
 
-#include "symbol.hpp"
-#include "scope.cpp"
+
 
 #include <string>
 
@@ -37,17 +36,24 @@ enum DataType
     TYPE_nothing
 };
 
+//needs to be able to see DataType
+#include "symbol.cpp"
+
+
+
+
 class AST {
  public:
   virtual ~AST() = default;
   virtual void printAST(std::ostream &out) const = 0;
-  virtual Value* compile() const { return nullptr; }
-  virtual Value* compile()  { return nullptr; }
+  virtual Value* compile() const {std::clog << "Called ast const compile" <<std::endl; return nullptr; }
+  virtual Value* compile()  { std::clog << "Called ast compile" <<std::endl; return nullptr; }
 
 
   void llvm_compile_and_dump(bool optimize=false) {
     // Initialize
     TheModule = std::make_unique<Module>("Grace", TheContext);
+    
     TheFPM = std::make_unique<legacy::FunctionPassManager>(TheModule.get());
     if (optimize) {
       TheFPM->add(createPromoteMemoryToRegisterPass());
@@ -98,7 +104,7 @@ class AST {
     // Emit the program code.
     compile();
 
-    std::cout << "Compiled!" << std::endl;
+    std::clog << "Compiled!" << std::endl;
 
     Builder.SetInsertPoint(BB);
     Builder.CreateRet(c32(0));
@@ -119,7 +125,7 @@ class AST {
   }
 
  public:
-  static ScopeTracker scope; //maybe some special class to do this?
+  static SymbolTable st; //maybe some special class to do this?
 
 
 
@@ -167,7 +173,22 @@ inline std::ostream &operator<<(std::ostream &out, const AST &ast) {
 }
 
 
-class Id : public AST {
+class Expr : public AST {
+ public:
+
+ void printAST(std::ostream &out) const override {
+    out << "Expr(empty)";
+  }
+
+    Value* compile() override {
+      std::clog << "Called base EXPR compile!" << std::endl;
+        // Implement compile for Expr if necessary, or keep it pure virtual
+    }
+};
+
+
+
+class Id : public Expr {
  public:
   Id(std::string *c): var(*c) {}
   void printAST(std::ostream &out) const override {
@@ -176,9 +197,10 @@ class Id : public AST {
 
   std::string getName() const { return var; }
 
+
  private:
   std::string var;
-  int offset;
+
 };
 
 
@@ -202,7 +224,22 @@ class IdList : public AST {
     out << ")";
   }
 
-    std::vector<Id *> getIds() const { return id_list; }
+
+  std::vector<Id *> getIds() const { return id_list; }
+
+
+    std::vector<Value*> compileVector() {
+    std::vector<Value*> args;
+
+    std::clog << "id_list compile: " << std::endl;
+
+    for(const auto &d : id_list) {
+        args.push_back(d->compile());
+    }
+
+
+    return args;
+  }
 
 
   private:
@@ -222,20 +259,6 @@ class Stmt : public AST {
 //   virtual void execute() const = 0;
 };
 
-class Expr : public AST {
- public:
-
- void printAST(std::ostream &out) const override {
-    out << "Expr(empty)";
-  }
-
-  // void check_type(DataType t) {
-  //   if (type != t) yyerror("Type mismatch");
-  // }
-//   virtual int eval() const = 0;
- protected:
-  DataType type;
-};
 
 
 
@@ -271,6 +294,8 @@ class TypeDef : public Stmt {
   void printAST(std::ostream &out) const override {
     out << "TypeDef(" << type << ", " << *array_size << ")";
   }
+
+  DataType getType() const { return type; }
 //   void allocate() const {
 //     rt_stack.push_back(0);
 //   }
@@ -295,12 +320,40 @@ class VarDec : public Stmt {
     out << "VarDec(" << *id_list << ": " << *type << ")";
   }
 
-  Value* compile() const override {
+  Value* compile() override {
+
+    //issues if multiple same name etc 
+    //TODO: correct type handling!, this works just for i32
+    for(auto id : id_list->getIds()) {
+      std::clog << "Compiling VarDec name: " << id->getName() << " Current scope: " << st.currentScope()->name << std::endl; 
+
+      AllocaInst* allocaInst = Builder.CreateAlloca(i32, 0, id->getName());
 
 
-    std::string name = id_list->getIds()[0]->getName();
+      std::clog << "Alloc " << id->getName() << std::endl;
 
-    std::cout << "name: " << name << std::endl; 
+
+      Node *idNode = new Node();
+      idNode->name = id->getName();
+      idNode->type = type->getType();
+      idNode->decl_type = DECL_var;
+      idNode->alloca = allocaInst;
+
+
+      std::clog << "Created node" << std::endl;
+      st.insertNode(idNode);
+
+      std::clog << "Inserted node" << std::endl;
+
+
+
+    }
+
+
+
+
+
+
 
     return nullptr;
   }
@@ -354,11 +407,10 @@ class If : public Stmt {
 
 
 class Lvalue : public Expr {
-//     public:
-//     Lvalue() {}
-//     void printAST(std::ostream &out) const override {
-//     out << "Lvalue()";
-//   }
+    public:
+    Lvalue() {}
+    virtual std::string getName() const { }
+
 //  public:
 //   virtual void execute() const = 0;
 };
@@ -373,18 +425,45 @@ class Assign : public Stmt {
     out << "Assign(" << *var << ", " << *expr << ")";
   }
   
-//   Value* compile() const override {
-//     char name[] = { var, '_', 'p', 't', 'r', '\0' };
-//     Value *lhs = Builder.CreateGEP(TheVars, {c32(0), c32(var - 'a')}, name);
-//     Value *rhs = expr->compile();
-//     Builder.CreateStore(rhs, lhs);
-//     return nullptr;
-//   }
+  Value* compile() override {
+
+    // char name[] = { var, '_', 'p', 't', 'r', '\0' };
+    // Value *lhs = Builder.CreateGEP(TheVars, {c32(0), c32(var - 'a')}, name);
+    // 
+    // Builder.CreateStore(rhs, lhs);
+
+
+    std::clog << "Assign compile: Current Scope: " << st.currentScope()->name  << std::endl;
+
+    std::clog << "Variable name: "<< var->getName() << std::endl;
+
+    Node *idNode = st.lookupNode(var->getName());
+
+    std::clog << "Found node: " << idNode->name << std::endl;
+
+
+
+    //Value *rhs = expr->compile();
+
+
+    Value *rhs = expr->compile();
+
+
+    std::clog << "Compiled rhs" << std::endl;
+
+    // Store the constant value into the alloca.
+    Builder.CreateStore(rhs, idNode->alloca);
+
+
+
+
+    return nullptr;
+  }
 
  private:
   Lvalue *var;
   Expr *expr;
-  int offset;
+
 };
 
 class While : public Stmt {
@@ -426,6 +505,22 @@ class StmtList : public Stmt {
     for (Stmt *s : stmt_list) delete s;
   }
   void add(Stmt *s) { stmt_list.push_back(s); }
+
+  //TODO: We need to check that the order of statements is correct! SUPER IMPORTANT!
+
+
+  Value* compile() const override {
+    std::clog << "StmtList compile: " << std::endl;
+
+
+
+    for (Stmt *s : stmt_list) s->compile();
+
+    std::clog << "StmtList compile done" << std::endl;
+
+    return nullptr;
+  }
+
 
   void printAST(std::ostream &out) const override {
     out << "StmtList(";
@@ -506,31 +601,30 @@ class BinOp : public Expr {
   void printAST(std::ostream &out) const override {
     out << "BinOp(" << *expr1 << ", " << op << ", " << *expr2 << ")";
   }
-//   void sem() override {
-//     expr1->check_type(TYPE_int);
-//     expr2->check_type(TYPE_int);
-//     switch(op) {
-//       case '+': case '-': case '*': case '/': case '%':
-// 	type = TYPE_int;
-//         break;
-//       case '<': case '=': case '>':
-// 	type = TYPE_bool;
-//         break;
-//     }
-//   }
-//   int eval() const override {
-//     switch (op) {
-//       case '+': return expr1->eval() + expr2->eval();
-//       case '-': return expr1->eval() - expr2->eval();
-//       case '*': return expr1->eval() * expr2->eval();
-//       case '/': return expr1->eval() / expr2->eval();
-//       case '%': return expr1->eval() % expr2->eval();
-//       case '<': return expr1->eval() < expr2->eval();
-//       case '=': return expr1->eval() == expr2->eval();
-//       case '>': return expr1->eval() > expr2->eval();
-//     }
-//     return 42;  // will never be reached...
-//   }
+
+  Value* compile() override{
+    std::clog << "BinOp compile: " << std::endl;
+    std::clog << "Left expr: " << std::endl;
+    std::clog << typeid(*expr1).name() << std::endl;
+    Value *l = expr1->compile();
+
+
+
+    std::clog << "Right expr: " << std::endl;
+    Value *r = expr2->compile();
+
+    
+
+    if(op == "+") {
+        return Builder.CreateAdd(l, r, "addtmp");
+    } else if(op == "-") {
+        return Builder.CreateSub(l, r, "subtmp");
+    } else if (op == "*"){
+        return Builder.CreateMul(l, r, "multmp");
+    }
+
+  }
+
  private:
   Expr *expr1;
   std::string op;
@@ -605,20 +699,28 @@ class FparType : public Stmt {
 
 class FparDef : public Stmt {
  public:
-  FparDef(Ref *r,std::string *t,IdList *i,FparType *ft) : ref(r),Tid(*t),id_list(i),fpar_type(ft) {}
+  FparDef(Ref *r,VarDec *i,FparType *ft) : ref(r),id_list(i),fpar_type(ft) {}
   ~FparDef() {
     delete ref; delete id_list; delete fpar_type;
   }
 
 
   void printAST(std::ostream &out) const override {
-    out << "FparDef("<< *ref<< ", " << Tid << ", " << *id_list << ", " << *fpar_type << ")";
+    out << "FparDef("<< *ref <<  ", " << *id_list << ", " << *fpar_type << ")";
+  }
+
+  Value* compile() override{
+    std::clog << "FparDef compile: " << std::endl;
+
+    Value * idList = id_list->compile();
+    std::clog << "FparDef compiled! " << std::endl;
+    return idList;
   }
 
   private:
     Ref *ref;
-    std::string Tid;
-    IdList *id_list;
+
+    VarDec *id_list;
     FparType *fpar_type;
 
 };
@@ -645,6 +747,21 @@ class FparDefList : public Stmt {
     out << ")";
   }
 
+  std::vector<Value*> compileVector() {
+    std::vector<Value*> args ;
+
+    std::clog << "FparDefList compile: " << std::endl;
+
+    for(const auto &d : fpardef_list) {
+
+        args.push_back(d->compile());
+    }
+
+    std::clog << "Fpar list compiled! " << std::endl;
+
+    return args;
+  }
+
   private:
     std::vector<FparDef *> fpardef_list;
 };
@@ -663,6 +780,13 @@ class FunctionHeader : public Stmt {
 
   void printAST(std::ostream &out) const override {
     out << "FunctionHeader("<< Tid<< ", " << *fpardef_list << ", " << type << ")";
+  }
+
+  Value* compile() override{
+      std::clog << "FunctionHeader compile: " << std::endl;
+      fpardef_list->compileVector();
+
+      return nullptr;
   }
 
   public:
@@ -693,7 +817,8 @@ class LocalDefList : public Stmt {
     out << ")";
   }
     Value* compile() const override {
-    
+        
+        std::clog << "LocalDefList compile: " << std::endl;
 
         for(const auto &d : localdef_list) {
             d->compile();
@@ -711,7 +836,9 @@ class LocalDefList : public Stmt {
 
 class FunctionDef : public Stmt {
  public:
-  FunctionDef(FunctionHeader *h,LocalDefList *l,StmtList *s) : header(h),localdef_list(l),stmt_list(s) {}
+  bool firstFunction;
+
+  FunctionDef(FunctionHeader *h,LocalDefList *l,StmtList *s) : header(h),localdef_list(l),stmt_list(s),firstFunction(false) {}
   ~FunctionDef() {
     delete localdef_list; delete stmt_list; delete header;
   }
@@ -730,24 +857,60 @@ class FunctionDef : public Stmt {
 
     Function *F = Function::Create(FT, Function::ExternalLinkage, header->Tid,TheModule.get());
 
+
+    //TODO: only if first function
+
+    std::clog << "First Function: " << firstFunction << std::endl;
+    if(firstFunction){
+      Builder.CreateCall(F);
+      firstFunction = false;
+    }
+
+
+    BasicBlock *previousBB = Builder.GetInsertBlock();
+
+
     BasicBlock *BB = BasicBlock::Create(TheContext, header->Tid, F);
     Builder.SetInsertPoint(BB);
 
+    std::clog << "Gereee" << std::endl;
 
-    scope.addScope(header->Tid); //add the name in scope 
-    std::cout << "Current Scope: " <<  scope.getCurrentScope() << std::endl;
 
+
+    Node *functionNode = new Node();
+    functionNode->name = header->Tid;
+    functionNode->decl_type = DECL_func;
+    functionNode->function = F;
+
+
+
+    st.insertNode(functionNode,DECL_func);
+
+
+    st.createScope(header->Tid); //add the name in scope 
+    
+    std::clog << "Current Scope: " <<  st.currentScope()->name << std::endl;
+
+    //TODO: figure out how we make arguments in llvm!
+    // header->compile();
 
     localdef_list->compile();
 
-    scope.removeScope(); //remove the name from scope
-
-
-
     stmt_list->compile();
 
-
+    //TODO: we should only do this if no return in stmt_list!
     Builder.CreateRetVoid();
+
+    Builder.SetInsertPoint(previousBB);
+    // 
+
+
+    std::clog << "Exiting scope: " << st.currentScope()->name << std::endl;
+
+    st.exitScope(); //remove the name from scope
+
+
+ 
 
 
 
@@ -762,10 +925,13 @@ class FunctionDef : public Stmt {
     out << "FunctionDef("<< *header<< ", " << *localdef_list << ", " << *stmt_list << ")";
   }
 
+
+
   private:
     FunctionHeader *header;
     LocalDefList *localdef_list;
     StmtList *stmt_list;
+    
 
 };
 
@@ -852,6 +1018,16 @@ class ExprList : public Expr {
     out << ")";
   }
 
+  std::vector<Value*> compileVector() {
+    std::vector<Value*> args;
+
+    for(const auto &d : expr_list) {
+        args.push_back(d->compile());
+    }
+
+    return args;
+  }
+
   private:
     std::deque<Expr *> expr_list;
 };
@@ -865,6 +1041,44 @@ class FuncCall : public Stmt, public Expr {
   void printAST(std::ostream &out) const override {
     out << "FuncCall(" << id << ", " << *expr_list << ")";
   }
+  Value* compile() override{
+    std::clog << "Compiling function call: " << id << std::endl;
+
+    std::vector<Value*> args = expr_list->compileVector();
+
+
+    Node* functionNode = st.lookupNode(id, DECL_func);
+
+    Function *func;
+
+    if (functionNode == nullptr) {
+        if(id == "writeInteger"){
+          
+          //cast vector Value to 64 bit
+          std::vector<Value*> args64;
+          for(auto &a : args) {
+              args64.push_back(Builder.CreateSExt(a, i64, "cast"));
+          }
+          args = args64;
+
+          func = TheWriteInteger;
+        }
+          else{
+          std::cerr << "Function " << id << " not declared" << std::endl;
+          exit(1);
+        }
+    }else{
+        func = functionNode->function;
+    }
+
+    //Value* callResult = Builder.CreateCall(TheWriteInteger, args64, "calltmp");
+    //false to last parm?
+    Builder.CreateCall(func, args);
+
+  
+    return nullptr;
+  }
+
 
  private:
   std::string id;
@@ -878,6 +1092,15 @@ class IntConst : public Expr {
   IntConst(int n): num(n) {}
   void printAST(std::ostream &out) const override {
     out << "IntConst(" << num << ")";
+  }
+
+  Value *compile() override {
+
+    std::clog << "Compiling expression: " << num << std::endl;
+    //return ConstantInt::get(TheContext, APInt(32, num));
+    //return ConstantInt::get(i32, num);
+    return ConstantInt::get(i32, num);
+
   }
 //   void sem() override {
 //     type = TYPE_int;
@@ -897,9 +1120,29 @@ class IdLval : public Lvalue {
  public:
   IdLval(std::string *c) : var(*c) {}
   void printAST(std::ostream &out) const override {
-    out << "Id(" << var << ")";
+    out << "IdLval(" << var << ")";
   }
 
+  std::string getName() const {
+    return var;
+  }
+
+  Value* compile() override{
+    
+    Node* idNode = st.lookupNode(var);
+    if(idNode == nullptr){
+      std::cerr << "Error: variable " << var << " not declared" << std::endl;
+      exit(1);
+    }
+
+    AllocaInst* alloca = idNode->alloca;
+
+
+    return Builder.CreateLoad(i32,alloca, var + "_load");
+
+
+
+  }
 
  private:
   std::string var;

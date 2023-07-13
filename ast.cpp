@@ -16,4 +16,4 @@ Type *AST::i64;
 
 
 
-ScopeTracker AST::scope = ScopeTracker();
+SymbolTable AST::st = SymbolTable();

@@ -5,7 +5,6 @@
 #include <iostream>
 
 #include <string>
-using namespace std;
 
 
 
@@ -15,6 +14,8 @@ using namespace std;
 
 
 #include "ast.hpp"
+
+
 
 
 %}
@@ -87,7 +88,7 @@ using namespace std;
 
 
   bool boolean;
-  Type type;
+  DataType type;
   LocalDefList *local_def_list;
 
   std::string *var;
@@ -130,7 +131,7 @@ using namespace std;
 
 %%
 
-program : func-def  { std::cout << "AST: " << *$1 << std::endl; }
+program : func-def  { std::clog << "AST: " << *$1 << std::endl; $1->firstFunction = true;  $1->llvm_compile_and_dump();  }
 ;
 
 local-def_list :
@@ -168,7 +169,7 @@ id_list :
 ;
 
 //func def
-fpar-def : ref_optional T_id id_list ':' fpar-type { $$ = new FparDef($1,$2,$3,$5); }
+fpar-def : ref_optional T_id id_list ':' fpar-type { $3->add(new Id($2)); $$ = new FparDef($1,new VarDec($3,new TypeDef(TYPE_int,new ArraySize())),$5); }
 ;
 
 data-type :
@@ -243,7 +244,7 @@ expr_list:
 
 expr_list_optional :
 /*nothing */ { $$ = new ExprList(); }
-| expr expr_list { $2->add($1); $$ = $2; }
+| expr expr_list { $2->add_front($1); $$ = $2; } /*we do this in order to preserve correct order*/
 ;
 
 
@@ -302,10 +303,11 @@ void yyerror(const char *msg) {
 int main() {
 
   // #ifdef YYDEBUG
-    yydebug = 0;
+    // yydebug = 0; not working tiwh clang++ ? google
   // #endif
 
   int res = yyparse();
-  if (res == 0) printf("Successful parsing\n");
+  if (res == 0) std::cerr << "Successful parsing" << std::endl;
+
   return res;
 }
