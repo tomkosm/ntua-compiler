@@ -97,8 +97,6 @@ class AST {
 
 
 
-
-
     FunctionType *writeString_type =
       FunctionType::get(Type::getVoidTy(TheContext),
                         {PointerType::get(i8, 0)}, false);
@@ -421,8 +419,7 @@ class CharConstSpecial : public CharConst {
 
   int escSeqToChar(std::string v) const
 {
-    std::clog << "specia! " << std::endl;
-    
+  
     int res;
     if (v[0] == '\\')
     {
@@ -1153,15 +1150,19 @@ class FuncCall : public Stmt, public Expr {
         }
         else if(id == "writeChar"){
 
-                    //cast vector Value to 64 bit
-          std::vector<Value*> args64;
-          for(auto &a : args) {
-              args64.push_back(Builder.CreateSExt(a, i64, "cast"));
-          }
-          //args = args64;
 
           func = TheWriteChar;
-        
+
+        }
+        else if(id == "writeString"){
+                 
+          
+          std::vector<Value*> argPointer = {Builder.CreateGEP(args[0]->getType(),args[0], {c32(0), c32(0)}, "nl")};
+          
+
+          args = argPointer;
+
+          func = TheWriteString;
 
         }
           else{
@@ -1259,6 +1260,52 @@ class StringConst : public Lvalue {
   void printAST(std::ostream &out) const override {
     out << "StringConst(" << var << ")";
   }
+
+
+  //TODO: make it work for the rest of the special chars  
+  std::string processString(const std::string& input) {
+    std::string output;
+    for (size_t i = 0; i < input.size(); ++i) {
+      if (input[i] == '\\') {
+        if (i + 1 < input.size()) {
+          switch (input[i + 1]) {
+            case 'n':
+              output.push_back('\n');
+              ++i;  // Skip the next character
+              break;
+            // Add other escape sequences as needed...
+            default:
+              output.push_back(input[i]);
+              break;
+          }
+        } else {
+          output.push_back(input[i]);
+        }
+      } else {
+        output.push_back(input[i]);
+      }
+    }
+    return output;
+  }
+
+  Value *compile() override {
+    std::clog << "Called StringConst compile!" << std::endl;
+
+    Constant *strConstant = ConstantDataArray::getString(TheContext, processString(var));
+
+
+    GlobalVariable *gv = new GlobalVariable(*TheModule,
+                                                      strConstant->getType(),
+                                                      true,
+                                                      GlobalValue::PrivateLinkage,
+                                                      strConstant);
+
+    return gv;
+
+  }
+
+
+
 
  private:
   std::string var;

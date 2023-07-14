@@ -76,7 +76,8 @@ SPECIAL \\(n|t|r|0|\\|\'|\"|x{HEX}{2})
  /* \"({D}|{L}|{SPECIAL})*\" { return T_const_str; } */
 
  \"([^"]|\\\")*\" { 
-  yylval.var = new std::string(yytext);
+  yylval.var = new std::string(yytext + 1, strlen(yytext) - 2);
+
   return T_const_str; }
 
 
