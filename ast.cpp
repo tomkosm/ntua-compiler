@@ -8,6 +8,7 @@ std::unique_ptr<legacy::FunctionPassManager> AST::TheFPM;
 GlobalVariable *AST::TheVars;
 GlobalVariable *AST::TheNL;
 Function *AST::TheWriteInteger;
+Function *AST::TheWriteChar;
 Function *AST::TheWriteString;
 
 Type *AST::i8;

@@ -51,6 +51,7 @@
 %token<var> T_const
 %token<num> T_const_num
 %token<character> T_const_char
+%token<var> T_const_char_special
 %token<var> T_const_str
 
 
@@ -264,6 +265,7 @@ any-operator: '+' | '-' | '*' | "div" | "mod"
 expr :
   T_const_num { $$ = new IntConst($1); }
 | T_const_char { $$ = new CharConst($1); }
+| T_const_char_special { $$ = new CharConstSpecial($1); }
 | l-value { $$ = $1; }
 | '(' expr ')' { $$ = $2; }
 | func-call { $$ = $1; }
@@ -301,7 +303,8 @@ void yyerror(const char *msg) {
 }
 
 int main() {
-
+  extern int yydebug;
+  yydebug = 0;
   // #ifdef YYDEBUG
     // yydebug = 0; not working tiwh clang++ ? google
   // #endif

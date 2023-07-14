@@ -86,6 +86,19 @@ class AST {
     TheWriteInteger =
       Function::Create(writeInteger_type, Function::ExternalLinkage,
                        "writeInteger", TheModule.get());
+
+
+    FunctionType *writeChar_type =
+      FunctionType::get(Type::getVoidTy(TheContext), {i8}, false);
+    TheWriteChar =
+      Function::Create(writeChar_type, Function::ExternalLinkage,
+                       "writeChar", TheModule.get());
+
+
+
+
+
+
     FunctionType *writeString_type =
       FunctionType::get(Type::getVoidTy(TheContext),
                         {PointerType::get(i8, 0)}, false);
@@ -138,6 +151,10 @@ class AST {
   static GlobalVariable *TheVars;
   static GlobalVariable *TheNL;
   static Function *TheWriteInteger;
+
+  static Function *TheWriteChar;
+
+
   static Function *TheWriteString;
 
   static Type *i8;
@@ -327,7 +344,18 @@ class VarDec : public Stmt {
     for(auto id : id_list->getIds()) {
       std::clog << "Compiling VarDec name: " << id->getName() << " Current scope: " << st.currentScope()->name << std::endl; 
 
-      AllocaInst* allocaInst = Builder.CreateAlloca(i32, 0, id->getName());
+      // AllocaInst* allocaInst = Builder.CreateAlloca(i32, 0, id->getName());
+
+
+      GlobalVariable *gVar = new llvm::GlobalVariable(
+        *TheModule,
+        i32,
+        false, // isConstant
+        GlobalValue::PrivateLinkage,
+        llvm::ConstantInt::get(TheContext, llvm::APInt(32, 0)), // Initializer
+        "gVar"
+      );
+
 
 
       std::clog << "Alloc " << id->getName() << std::endl;
@@ -337,7 +365,7 @@ class VarDec : public Stmt {
       idNode->name = id->getName();
       idNode->type = type->getType();
       idNode->decl_type = DECL_var;
-      idNode->alloca = allocaInst;
+      idNode->var = gVar;
 
 
       std::clog << "Created node" << std::endl;
@@ -368,14 +396,74 @@ class VarDec : public Stmt {
 
 class CharConst : public Expr {
  public:
-  CharConst(char v): var(v) {}
+  CharConst(char s): var(s) {}
   void printAST(std::ostream &out) const override {
     out << "CharConst(" << var << ")";
   }
+
+  Value *compile() override {
+    std::clog << "Called CharConst compile!" << std::endl;
+    return ConstantInt::get(i8, var);
+  }
+
+
  private:
   char var;
   };
 
+
+class CharConstSpecial : public CharConst {
+ public:
+  CharConstSpecial(std::string *s): CharConst('a'), var(*s)  {}
+  void printAST(std::ostream &out) const override {
+    out << "CharConstSpecial(" << escSeqToChar(var) << ")";
+  }
+
+  int escSeqToChar(std::string v) const
+{
+    std::clog << "specia! " << std::endl;
+    
+    int res;
+    if (v[0] == '\\')
+    {
+
+
+        switch (v[1])
+        {
+        case 'n':
+            res = '\n'; break;
+        case 't':
+            res = '\t'; break;
+        case 'r':
+            res = '\r'; break;
+        case '0':
+            res = '\0'; break;
+        case '\\':
+            res = '\\'; break;
+        case '\'':
+            res = '\''; break;
+        case '\"':
+            res = '\"'; break;
+        case 'x':
+            res = std::stoi(v.substr(2), nullptr, 16); break;
+        default:
+            break;
+        }
+    
+
+    return res;
+}
+}
+  Value *compile() override {
+    std::clog << "Called CharConstSpecial compile!" << std::endl;
+    return ConstantInt::get(i8, escSeqToChar(var));
+  }
+
+
+
+ private:
+  std::string var;
+  };
 
 
 
@@ -452,7 +540,7 @@ class Assign : public Stmt {
     std::clog << "Compiled rhs" << std::endl;
 
     // Store the constant value into the alloca.
-    Builder.CreateStore(rhs, idNode->alloca);
+    Builder.CreateStore(rhs, idNode->var);
 
 
 
@@ -1063,6 +1151,19 @@ class FuncCall : public Stmt, public Expr {
 
           func = TheWriteInteger;
         }
+        else if(id == "writeChar"){
+
+                    //cast vector Value to 64 bit
+          std::vector<Value*> args64;
+          for(auto &a : args) {
+              args64.push_back(Builder.CreateSExt(a, i64, "cast"));
+          }
+          //args = args64;
+
+          func = TheWriteChar;
+        
+
+        }
           else{
           std::cerr << "Function " << id << " not declared" << std::endl;
           exit(1);
@@ -1135,10 +1236,11 @@ class IdLval : public Lvalue {
       exit(1);
     }
 
-    AllocaInst* alloca = idNode->alloca;
+    GlobalVariable* gvar = idNode->var;
 
 
-    return Builder.CreateLoad(i32,alloca, var + "_load");
+
+    return Builder.CreateLoad(i32,gvar, var + "_load");
 
 
 

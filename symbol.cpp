@@ -27,7 +27,7 @@ struct Node{
     DeclType decl_type;
     std::string name;
 
-    AllocaInst *alloca;
+    GlobalVariable *var;
     Function *function;
 };
 

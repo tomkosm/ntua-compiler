@@ -63,9 +63,14 @@ SPECIAL \\(n|t|r|0|\\|\'|\"|x{HEX}{2})
 
  /* σταθερούς χαρακτήρες */
 
-'.'|'{SPECIAL}'  { 
-  yylval.character = yytext[0];
+'.'  { 
+  yylval.character = yytext[1];
   return T_const_char; }
+
+'{SPECIAL}'  { 
+  yylval.var = new std::string(yytext + 1, strlen(yytext) - 2);
+  return T_const_char_special; }
+
 
  /* σταθερές συμβολοσειρές 8eoro oti ginete k adeio ""  */
  /* \"({D}|{L}|{SPECIAL})*\" { return T_const_str; } */
