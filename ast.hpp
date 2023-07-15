@@ -239,7 +239,7 @@ class IdList : public AST {
     out << ")";
   }
 
-
+  //TODO: needs to return the type of each!
   std::vector<Id *> getIds() const { return id_list; }
 
 
@@ -247,6 +247,9 @@ class IdList : public AST {
     std::vector<Value*> args;
 
     std::clog << "id_list compile: " << std::endl;
+
+    // std::clog << "type: " << 
+
 
     for(const auto &d : id_list) {
         args.push_back(d->compile());
@@ -309,7 +312,7 @@ class TypeDef : public Stmt {
   void printAST(std::ostream &out) const override {
     out << "TypeDef(" << type << ", " << *array_size << ")";
   }
-
+  //TODO: handle arrays
   DataType getType() const { return type; }
 //   void allocate() const {
 //     rt_stack.push_back(0);
@@ -337,6 +340,22 @@ class VarDec : public Stmt {
 
   Value* compile() override {
 
+    Type * itype;
+    int initializerSize;
+
+    DataType dtype = type->getType();
+
+
+    //TODO: handle arrays
+    if(dtype == TYPE_int){
+      itype = i32;
+      initializerSize = 32;
+    }
+    else if(dtype == TYPE_char){
+      itype = i8;
+      initializerSize = 8;
+    }
+
     //issues if multiple same name etc 
     //TODO: correct type handling!, this works just for i32
     for(auto id : id_list->getIds()) {
@@ -347,10 +366,10 @@ class VarDec : public Stmt {
 
       GlobalVariable *gVar = new llvm::GlobalVariable(
         *TheModule,
-        i32,
+        itype,
         false, // isConstant
         GlobalValue::PrivateLinkage,
-        llvm::ConstantInt::get(TheContext, llvm::APInt(32, 0)), // Initializer
+        llvm::ConstantInt::get(TheContext, llvm::APInt(initializerSize, 0)), // Initializer
         "gVar"
       );
 
@@ -364,7 +383,7 @@ class VarDec : public Stmt {
       idNode->type = type->getType();
       idNode->decl_type = DECL_var;
       idNode->var = gVar;
-
+      idNode->llvm_type = itype;
 
       std::clog << "Created node" << std::endl;
       st.insertNode(idNode);
@@ -1150,7 +1169,6 @@ class FuncCall : public Stmt, public Expr {
         }
         else if(id == "writeChar"){
 
-
           func = TheWriteChar;
 
         }
@@ -1240,8 +1258,8 @@ class IdLval : public Lvalue {
     GlobalVariable* gvar = idNode->var;
 
 
-
-    return Builder.CreateLoad(i32,gvar, var + "_load");
+    // TODO: we need to check the type!!
+    return Builder.CreateLoad(idNode->llvm_type,gvar, var + "_load");
 
 
 
