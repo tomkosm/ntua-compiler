@@ -68,18 +68,8 @@ class AST {
     i32 = IntegerType::get(TheContext, 32);
     i64 = IntegerType::get(TheContext, 64);
  
-    // Initialize global variables
-    ArrayType *vars_type = ArrayType::get(i32, 26);
-    TheVars = new GlobalVariable(
-      *TheModule, vars_type, false, GlobalValue::PrivateLinkage,
-      ConstantAggregateZero::get(vars_type), "vars");
-    TheVars->setAlignment(MaybeAlign(16));
-    ArrayType *nl_type = ArrayType::get(i8, 2);
-    TheNL = new GlobalVariable(
-      *TheModule, nl_type, true, GlobalValue::PrivateLinkage,
-      ConstantArray::get(nl_type, {c8('\n'), c8('\0')}), "nl");
-    TheNL->setAlignment(MaybeAlign(1));
- 
+
+
     // Initialize library functions
     FunctionType *writeInteger_type =
       FunctionType::get(Type::getVoidTy(TheContext), {i64}, false);
@@ -270,6 +260,8 @@ class IdList : public AST {
 
 class Stmt : public AST {
  public:
+   void name(){std::clog << "Stmt name" << std::endl;}
+
    void printAST(std::ostream &out) const override {
     out << "Stmt(empty)";
   }
@@ -483,32 +475,6 @@ class CharConstSpecial : public CharConst {
 
 
 
-class If : public Stmt {
- public:
-  If(Expr *c, Stmt *s1, Stmt *s2 = nullptr) : cond(c), stmt1(s1), stmt2(s2) {}
-  ~If() { delete cond; delete stmt1; delete stmt2; }
-  void printAST(std::ostream &out) const override {
-    out << "If(" << *cond << ", " << *stmt1;
-    if (stmt2 != nullptr) out << ", " << *stmt2;
-    out << ")";
-  }
-//   void sem() override {
-//     cond->check_type(TYPE_bool);
-//     stmt1->sem();
-//     if (stmt2 != nullptr) stmt2->sem();
-//   }
-//   void execute() const override {
-//     if (cond->eval())
-//       stmt1->execute();
-//     else if (stmt2 != nullptr)
-//       stmt2->execute();
-//   }
- private:
-  Expr *cond;
-  Stmt *stmt1;
-  Stmt *stmt2;
-};
-
 
 class Lvalue : public Expr {
     public:
@@ -610,6 +576,7 @@ class StmtList : public Stmt {
   }
   void add(Stmt *s) { stmt_list.push_back(s); }
 
+  void name(){std::clog << "StmtList name" << std::endl;}
   //TODO: We need to check that the order of statements is correct! SUPER IMPORTANT!
 
 
@@ -652,50 +619,57 @@ class StmtList : public Stmt {
 };
 
 
-// class Block : public Stmt {
-//  public:
-//   Block() : decl_list(), stmt_list() {}
-//   ~Block() {
-//     for (Decl *d : decl_list) delete d;
-//     for (Stmt *s : stmt_list) delete s;
-//   }
-//   void append_decl(Decl *d) { decl_list.push_back(d); }
-//   void append_stmt(Stmt *s) { stmt_list.push_back(s); }
-//   void merge(Block *b) {
-//     stmt_list = b->stmt_list;
-//     b->stmt_list.clear();
-//     delete b;
-//   }
-//   void printAST(std::ostream &out) const override {
-//     out << "Block(";
-//     bool first = true;
-//     for (const auto &d : decl_list) {
-//       if (!first) out << ", ";
-//       first = false;
-//       out << *d;
-//     }
-//     for (const auto &s : stmt_list) {
-//       if (!first) out << ", ";
-//       first = false;
-//       out << *s;
-//     }
-//     out << ")";
-//   }
-//   void sem() override {
-//     st.push_scope();
-//     for (Decl *d : decl_list) d->sem();
-//     for (Stmt *s : stmt_list) s->sem();
-//     st.pop_scope();
-//   }
-//   void execute() const override {
-//     for (Decl *d : decl_list) d->allocate();
-//     for (Stmt *s : stmt_list) s->execute();
-//     for (Decl *d : decl_list) d->deallocate();
-//   }
-//  private:
-//   std::vector<Decl *> decl_list;
-//   std::vector<Stmt *> stmt_list;
-// };
+class If : public Stmt {
+ public:
+  If(Expr *c, Stmt *s1, Stmt *s2 = nullptr) : cond(c), stmt1(s1), stmt2(s2) {}
+  ~If() { delete cond; delete stmt1; delete stmt2; }
+  void printAST(std::ostream &out) const override {
+    out << "If(" << *cond << ", " << *stmt1;
+    if (stmt2 != nullptr) out << ", " << *stmt2;
+    out << ")";
+  }
+
+  Value* compile()  override {
+  
+    std::clog << "Called If compile!" << std::endl;
+
+    //TODO: figure out if there is some better way other than doing this...
+    StmtList* stmtList1 = dynamic_cast<StmtList*>(stmt1);
+    StmtList* stmtList2 = dynamic_cast<StmtList*>(stmt2);
+
+
+
+    Value *condition = cond->compile();
+    // Value *cond = Builder.CreateICmpNE(v, c32(0), "if_cond");
+    Function *TheFunction = Builder.GetInsertBlock()->getParent();
+    BasicBlock *ThenBB =
+      BasicBlock::Create(TheContext, "then", TheFunction);
+    BasicBlock *ElseBB =
+      BasicBlock::Create(TheContext, "else", TheFunction);
+    BasicBlock *AfterBB =
+      BasicBlock::Create(TheContext, "endif", TheFunction);
+    Builder.CreateCondBr(condition, ThenBB, ElseBB);
+    Builder.SetInsertPoint(ThenBB);
+    std::clog << "About to compile stmt" << std::endl;
+    stmtList1->compile();
+    Builder.CreateBr(AfterBB);
+    Builder.SetInsertPoint(ElseBB);
+    if (stmtList2 != nullptr) stmtList2->compile();
+    Builder.CreateBr(AfterBB);
+    Builder.SetInsertPoint(AfterBB);
+    return nullptr;
+
+
+  
+  }
+
+ private:
+  Expr *cond;
+  Stmt *stmt1;
+  Stmt *stmt2;
+};
+
+
 
 class BinOp : public Expr {
     //also take care of conds 
@@ -1075,6 +1049,17 @@ class CompareOp : public Cond {
   ~CompareOp() { delete expr1; delete expr2; }
   void printAST(std::ostream &out) const override {
     out << "CompareOp("<< op<< ", " << *expr1 << ", " << *expr2 << ")";
+  }
+
+  Value *compile() override{
+
+    Value *val1 = expr1->compile();
+    Value *val2 = expr2->compile();
+
+
+    Value *res = Builder.CreateICmpEQ(val1, val2, "cmp"); 
+    return res;
+
   }
 
  private:

@@ -5,8 +5,7 @@ IRBuilder<> AST::Builder(TheContext);
 std::unique_ptr<Module> AST::TheModule;
 std::unique_ptr<legacy::FunctionPassManager> AST::TheFPM;
 
-GlobalVariable *AST::TheVars;
-GlobalVariable *AST::TheNL;
+
 Function *AST::TheWriteInteger;
 Function *AST::TheWriteChar;
 Function *AST::TheWriteString;
