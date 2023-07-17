@@ -32,9 +32,9 @@ SPECIAL \\(n|t|r|0|\\|\'|\"|x{HEX}{2})
 
  /* λέξεις κλειδιά */
 
-"and" {return T_and; }
+"and" {yylval.var = new std::string(yytext); return T_and; }
 "char" {return T_char; }
-"div" {return T_div; }
+"div" {yylval.var = new std::string(yytext); return T_div; }
 "do" {return T_do; }
 "else" {return T_else; }
 "fun" {return T_fun; }

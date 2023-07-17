@@ -29,6 +29,7 @@ struct Node{
 
     GlobalVariable *var;
     Function *function;
+    llvm::Type *llvm_type;
 };
 
 
@@ -111,88 +112,5 @@ class SymbolTable{
 
 };
 
-
-// SymbolTable* st = new SymbolTable();
-
-// st->createScope("global2", nullptr);
-
-// st->current_scope();
-
-// int main(){
-
-//     SymbolTable* stt = new SymbolTable(); // Declare and initialize SymbolTable object
-
-//     stt->createScope("global2");
-
-//     Node* node = new Node();
-//     node->name = "x";
-//     node->type = TYPE_int;
-//     node->decl_type = DECL_var;
-
-
-//     stt->insertNode(node);
-//     stt->createScope("global3");
-
-//     stt->currentScope();
-
-//     stt->lookupNode("x");
-
-
-// }
-
-// enum Type { TYPE_int, TYPE_bool, TYPE_char };
-
-// struct STEntry {
-//   Type type;
-//   int offset;
-//   STEntry() {}
-//   STEntry(Type t, int o) : type(t), offset(o) {}
-// };
-
-// class Scope {
-//  public:
-//   Scope(int o = -1) : offset(o) {}
-//   STEntry *lookup(char c) {
-//     if (locals.find(c) == locals.end()) return nullptr;
-//     return &(locals[c]);
-//   }
-//   void insert(char c, Type t) {
-//     if (locals.find(c) != locals.end())
-//       yyerror("Duplicate variable declaration");
-//     locals[c] = STEntry(t, offset++);
-//   }
-//   int get_offset() {
-//     return offset;
-//   }
-//  private:
-//   std::map<char, STEntry> locals;
-//   int offset;
-// };
-
-// class SymbolTable {
-//  public:
-//   STEntry *lookup(char c) {
-//     for (auto s = scopes.rbegin(); s != scopes.rend(); ++s) {
-//       STEntry *e = s->lookup(c);
-//       if (e != nullptr) return e;
-//     }
-//     yyerror("Variable not found");
-//     return nullptr;
-//   }
-//   void insert(char c, Type t) {
-//     scopes.back().insert(c, t);
-//   }
-//   void push_scope() {
-//     int o = scopes.empty() ? 0 : scopes.back().get_offset();
-//     scopes.push_back(Scope(o));
-//   }
-//   void pop_scope() {
-//     scopes.pop_back();
-//   }
-//  private:
-//   std::vector<Scope> scopes;
-// };
-
-// extern SymbolTable st;
 
 #endif
