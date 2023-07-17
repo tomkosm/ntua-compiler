@@ -56,12 +56,14 @@
 
 
 
-%left<var> '*' "div" "mod"
-%left<var> '+' '-'
-%nonassoc<var> '<' "<=" '>' ">=" '=' '#'
-%nonassoc<var> "not"
-%left<var> "and"
 %left<var> "or"
+%left<var> "and"
+%nonassoc<var> "not"
+%nonassoc<var> '<' "<=" '>' ">=" '=' '#'
+%left<var> '+' '-'
+%left<var> '*' "div" "mod"
+%nonassoc<var> UPLUS UMINUS
+
 
 %expect 2 /* ??? wrong ?*/
 
@@ -269,8 +271,8 @@ expr :
 | l-value { $$ = $1; }
 | '(' expr ')' { $$ = $2; }
 | func-call { $$ = $1; }
-| '+' expr { $$ = new UnaryOp($2,$1); }
-| '-' expr  { $$ = new UnaryOp($2,$1); }
+| '+' expr %prec UPLUS { $$ = new UnaryOp($2,$1); }
+| '-' expr %prec UMINUS  { $$ = new UnaryOp($2,$1); }
 | expr '+' expr { $$ = new BinOp($1,$2,$3); }
 | expr '-' expr { $$ = new BinOp($1,$2,$3); }
 | expr '*' expr { $$ = new BinOp($1,$2,$3); }
