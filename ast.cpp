@@ -9,6 +9,8 @@ std::unique_ptr<legacy::FunctionPassManager> AST::TheFPM;
 Function *AST::TheWriteInteger;
 Function *AST::TheWriteChar;
 Function *AST::TheWriteString;
+Function *AST::TheReadInteger;
+
 
 Type *AST::i8;
 Type *AST::i32;

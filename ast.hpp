@@ -48,7 +48,8 @@ class AST {
   virtual void printAST(std::ostream &out) const = 0;
   virtual Value* compile() const {std::clog << "Called ast const compile" <<std::endl; return nullptr; }
   virtual Value* compile()  { std::clog << "Called ast compile" <<std::endl; return nullptr; }
-
+  virtual Node *compileArray() {}
+  std::string getName(){}
 
   void llvm_compile_and_dump(bool optimize=false) {
     // Initialize
@@ -93,6 +94,22 @@ class AST {
     TheWriteString =
       Function::Create(writeString_type, Function::ExternalLinkage,
                        "writeString", TheModule.get());
+
+
+
+    FunctionType *readInteger_type =
+      FunctionType::get(i64, {}, false);
+
+    TheReadInteger =
+      Function::Create(readInteger_type, Function::ExternalLinkage,
+                       "readInteger", TheModule.get());
+
+
+
+
+
+
+
 
     // Define and start the main function.
     FunctionType *main_type = FunctionType::get(i32, {}, false);
@@ -144,6 +161,10 @@ class AST {
 
 
   static Function *TheWriteString;
+
+
+    static Function *TheReadInteger;
+
 
   static Type *i8;
   static Type *i32;
@@ -290,6 +311,10 @@ class ArraySize : public Stmt {
     out << ")";
   }
 
+  std::vector<int> getSizes() const { return array_list;}
+
+  
+
  private:
   std::vector<int> array_list;
 };
@@ -306,12 +331,11 @@ class TypeDef : public Stmt {
   }
   //TODO: handle arrays
   DataType getType() const { return type; }
-//   void allocate() const {
-//     rt_stack.push_back(0);
-//   }
-//   void deallocate() const {
-//     rt_stack.pop_back();
-//   }
+ 
+  std::vector<int> getSizes() const { return array_size->getSizes();}
+
+
+
  private:
   DataType type;
   ArraySize *array_size;
@@ -348,8 +372,25 @@ class VarDec : public Stmt {
       initializerSize = 8;
     }
 
+
+    std::vector<int> arraysizes = type->getSizes();
+    Constant* Initializer;
+    ArrayType* ArrayTy;
+
+    if(arraysizes.size() == 0){
+      Initializer = ConstantInt::get(TheContext, llvm::APInt(initializerSize, 0));
+
+    }else if(arraysizes.size() == 1){
+      //wrong need to handle multi dim
+      ArrayTy = ArrayType::get(itype, arraysizes[0]);
+      std::vector<Constant*> constArray(arraysizes[0], ConstantInt::get(TheContext, APInt(32, 0)));
+      Initializer = ConstantArray::get(ArrayTy, constArray);
+
+      itype = ArrayTy;
+    }
+
+
     //issues if multiple same name etc 
-    //TODO: correct type handling!, this works just for i32
     for(auto id : id_list->getIds()) {
       std::clog << "Compiling VarDec name: " << id->getName() << " Current scope: " << st.currentScope()->name << std::endl; 
 
@@ -361,7 +402,7 @@ class VarDec : public Stmt {
         itype,
         false, // isConstant
         GlobalValue::PrivateLinkage,
-        llvm::ConstantInt::get(TheContext, llvm::APInt(initializerSize, 0)), // Initializer
+        Initializer, // Initializer
         "gVar"
       );
 
@@ -382,15 +423,7 @@ class VarDec : public Stmt {
 
       std::clog << "Inserted node" << std::endl;
 
-
-
     }
-
-
-
-
-
-
 
     return nullptr;
   }
@@ -479,11 +512,142 @@ class CharConstSpecial : public CharConst {
 class Lvalue : public Expr {
     public:
     Lvalue() {}
-    virtual std::string getName() const { }
-
+    virtual std::string getName() { std::clog << "Called Lvalue getName!" << std::endl; return ""; }
+    virtual Value* compileAssign() { std::clog << "Called Lvalue compileAssign!" << std::endl; return nullptr; }
 //  public:
 //   virtual void execute() const = 0;
 };
+
+class IdLval : public Lvalue {
+ public:
+  IdLval(std::string *c) : var(*c) {}
+  void printAST(std::ostream &out) const override {
+    out << "IdLval(" << var << ")";
+  }
+
+  std::string getName() override {
+    std::clog << "IDLVAL var: "  << std::endl;
+    return var;
+  }
+
+
+  Value* compile() override{
+    
+    Node* idNode = st.lookupNode(var);
+    if(idNode == nullptr){
+      std::cerr << "Error: variable " << var << " not declared" << std::endl;
+      exit(1);
+    }
+
+    Value * gvar = idNode->var;
+
+
+    return gvar;
+    // TODO: we need to check the type!!
+    //return Builder.CreateLoad(idNode->llvm_type,gvar, var + "_load");
+
+
+
+  }
+
+  Value *compileAssign() {
+    return compile();
+  }
+
+  Node *compileArray() override{
+
+    Node* idNode = st.lookupNode(var);
+    if(idNode == nullptr){
+      std::cerr << "Error: variable " << var << " not declared" << std::endl;
+      exit(1);
+    }
+
+    return idNode;
+
+
+
+  }
+
+ private:
+  std::string var;
+  int offset;
+};
+
+
+
+class ArrayElem : public Lvalue {
+ public: /*need to support arrays too!*/
+  ArrayElem(Lvalue *lhs, Expr *rhs): var(lhs), expr(rhs) {}
+  ~ArrayElem() { delete var; delete expr; }
+  void printAST(std::ostream &out) const override {
+    out << "ArrayElem(" << *var << ", " << *expr << ")";
+  }
+
+  std::string getName() override {
+    std::clog << "Called ArrayElem getName!" << std::endl;
+    return var->getName();
+  }
+
+  Value *compileAssign(){
+    std::clog << "Compiling compileAssign array element: " << *var << std::endl;
+
+    Node *array = var->compileArray();
+
+    Value *index = expr->compile();
+
+    std::vector<Value*> arrayIndex = {c32(0), index};
+
+    Value *elementPtr = Builder.CreateGEP(array->llvm_type,array->var, arrayIndex, "arrayElem");
+    
+
+
+    //used for compile()
+    this->datatype = array->type;
+    
+    return elementPtr;
+
+    //
+    //return elementValue;
+
+  }
+
+    Value *compile() override{
+
+    std::clog << "Compiling array element: " << *var << std::endl;
+    
+    Value *elementPtr = compileAssign();
+    
+
+    Type* elementType;
+    if(this->datatype == TYPE_int){
+      elementType = i32;
+    }
+    else if(this->datatype == TYPE_char){
+      elementType = i8;
+    }
+    else{
+      std::cerr << "Error: invalid type" << std::endl;
+      exit(1);
+    }
+
+
+    Value* elementValue = Builder.CreateLoad({i32},elementPtr, "elementValue");
+
+    return elementValue;
+
+    
+  }
+
+
+ private:
+  Lvalue *var;
+  Expr *expr;
+
+  DataType datatype;
+
+  int offset;
+};
+
 
 
 
@@ -505,11 +669,13 @@ class Assign : public Stmt {
 
     std::clog << "Assign compile: Current Scope: " << st.currentScope()->name  << std::endl;
 
+    std::clog << *var << std::endl;
+
     std::clog << "Variable name: "<< var->getName() << std::endl;
 
-    Node *idNode = st.lookupNode(var->getName());
+    // Node *idNode = st.lookupNode(var->getName());
 
-    std::clog << "Found node: " << idNode->name << std::endl;
+
 
 
 
@@ -518,11 +684,12 @@ class Assign : public Stmt {
 
     Value *rhs = expr->compile();
 
+    Value *lhs = var->compileAssign();
 
     std::clog << "Compiled rhs" << std::endl;
 
     // Store the constant value into the alloca.
-    Builder.CreateStore(rhs, idNode->var);
+    Builder.CreateStore(rhs, lhs);
 
 
 
@@ -543,14 +710,7 @@ class While : public Stmt {
   void printAST(std::ostream &out) const override {
     out << "While(" << *expr << ", " << *stmt << ")";
   }
-//   void sem() override {
-//     expr->check_type(TYPE_int);
-//     stmt->sem();
-//   }
-//   void execute() const override {
-//     for (int times = expr->eval(), i = 0; i < times; ++i)
-//       stmt->execute();
-//   }
+
  private:
   Expr *expr;
   Stmt *stmt;
@@ -583,8 +743,6 @@ class StmtList : public Stmt {
   Value* compile() const override {
     std::clog << "StmtList compile: " << std::endl;
 
-
-
     for (Stmt *s : stmt_list) s->compile();
 
     std::clog << "StmtList compile done" << std::endl;
@@ -603,17 +761,7 @@ class StmtList : public Stmt {
     }
     out << ")";
   }
-//   void sem() override {
-//     st.push_scope();
-//     for (Decl *d : decl_list) d->sem();
-//     for (Stmt *s : stmt_list) s->sem();
-//     st.pop_scope();
-//   }
-//   void execute() const override {
-//     for (Decl *d : decl_list) d->allocate();
-//     for (Stmt *s : stmt_list) s->execute();
-//     for (Decl *d : decl_list) d->deallocate();
-//   }
+
  private:
   std::vector<Stmt *> stmt_list;
 };
@@ -694,11 +842,15 @@ class BinOp : public Expr {
     
 
     if(op == "+") {
-        return Builder.CreateAdd(l, r, "addtmp");
-    } else if(op == "-") {
-        return Builder.CreateSub(l, r, "subtmp");
+      return Builder.CreateAdd(l, r, "addtmp");
+    } else if (op == "-") {
+      return Builder.CreateSub(l, r, "subtmp");
     } else if (op == "*"){
-        return Builder.CreateMul(l, r, "multmp");
+      return Builder.CreateMul(l, r, "multmp");
+    } else if (op == "div"){
+      return Builder.CreateSDiv(l, r, "divtmp");
+    } else if (op == "mod"){
+      return Builder.CreateSRem(l, r, "modtmp");
     }
 
   }
@@ -718,17 +870,20 @@ class UnaryOp : public Expr {
     out << "UnaryOp("<< var<< ", " << *expr1 << ")";
 
   }
-//   void sem() override {
-//     expr1->check_type(TYPE_int);
-//     switch(op) {
-//       case '+': case '-': case '*': case '/': case '%':
-// 	type = TYPE_int;
-//         break;
-//       case '<': case '=': case '>':
-// 	type = TYPE_bool;
-//         break;
-//     }
-//   }
+  Value *compile() override{
+
+    if(var == "+"){
+      //i dont think we need to do anything here
+      return expr1->compile();
+    }
+    else if(var == "-"){
+      // we do 0-value(expr1) to inverse
+      Value *v = expr1->compile();
+      return Builder.CreateSub(Builder.getInt32(0), v, "invertedVal");
+
+    }
+
+  }
  private:
   Expr *expr1;
   std::string var;
@@ -1034,7 +1189,18 @@ class BinOpCond : public Cond {
     out << "BinOpCond("<< op<< ", " << *expr1 << ", " << *expr2 << ")";
 
   }
+  Value *compile() override{
 
+    Value *val1 = expr1->compile();
+    Value *val2 = expr2->compile();
+    
+    if(op == "and"){
+      return Builder.CreateAnd(val1, val2, "andtmp");
+    }
+    else if(op == "or"){
+      return Builder.CreateOr(val1, val2, "ortmp");
+    }
+  }
  private:
   Expr *expr1;
   std::string op;
@@ -1056,9 +1222,31 @@ class CompareOp : public Cond {
     Value *val1 = expr1->compile();
     Value *val2 = expr2->compile();
 
+    //TODO: support arrays
+    if(op == "<"){
+      return Builder.CreateICmpSLT(val1, val2, "cmplt");
+    }
+    else if(op == "<="){
+      return Builder.CreateICmpSLE(val1, val2, "cmpgt");
+    }
+    else if(op == ">"){
+      return Builder.CreateICmpSGT(val1, val2, "cmpgt");
+    }
+    else if(op == ">="){
+      return Builder.CreateICmpSGE(val1, val2, "cmpgt");
+    }
+    else if(op == "="){
+      return Builder.CreateICmpEQ(val1, val2, "cmpeq");
+    }
+    else if(op == "#"){
+      return Builder.CreateICmpNE(val1, val2, "cmpne");
+    }
 
-    Value *res = Builder.CreateICmpEQ(val1, val2, "cmp"); 
-    return res;
+    else{
+        std::cerr << "invalid binary operator" << std::endl;
+        exit(1);
+    }
+
 
   }
 
@@ -1076,6 +1264,21 @@ class UnaryOpCond : public Cond {
   ~UnaryOpCond() { delete expr1; }
   void printAST(std::ostream &out) const override {
     out << "UnaryOpCond("<< op<< ", " << *expr1 << ")";
+  }
+
+  Value *compile() override{
+
+    Value *val1 = expr1->compile();
+
+    //not other unary ops
+    if(op == "not"){
+      return Builder.CreateNot(val1, "not");
+    }
+
+    else{
+        std::cerr << "invalid unary operator" << std::endl;
+        exit(1);
+    }
   }
 
  private:
@@ -1168,6 +1371,10 @@ class FuncCall : public Stmt, public Expr {
           func = TheWriteString;
 
         }
+        else if(id == "readInteger"){
+          
+          func = TheReadInteger;
+        }
           else{
           std::cerr << "Function " << id << " not declared" << std::endl;
           exit(1);
@@ -1176,12 +1383,20 @@ class FuncCall : public Stmt, public Expr {
         func = functionNode->function;
     }
 
-    //Value* callResult = Builder.CreateCall(TheWriteInteger, args64, "calltmp");
-    //false to last parm?
-    Builder.CreateCall(func, args);
 
-  
-    return nullptr;
+    std::clog << "Function: " << " found" << std::endl;
+
+    
+    Value *res = Builder.CreateCall(func, args);
+
+
+    if(id == "readInteger"){
+      return Builder.CreateTrunc(res, i32, "cast");
+    }
+    else{
+      return res;
+    }
+
   }
 
 
@@ -1207,53 +1422,13 @@ class IntConst : public Expr {
     return ConstantInt::get(i32, num);
 
   }
-//   void sem() override {
-//     type = TYPE_int;
-//   }
-//   int eval() const override {
-//     return num;
-//   }
+
  private:
   int num;
 };
 
 
 
-
-
-class IdLval : public Lvalue {
- public:
-  IdLval(std::string *c) : var(*c) {}
-  void printAST(std::ostream &out) const override {
-    out << "IdLval(" << var << ")";
-  }
-
-  std::string getName() const {
-    return var;
-  }
-
-  Value* compile() override{
-    
-    Node* idNode = st.lookupNode(var);
-    if(idNode == nullptr){
-      std::cerr << "Error: variable " << var << " not declared" << std::endl;
-      exit(1);
-    }
-
-    GlobalVariable* gvar = idNode->var;
-
-
-    // TODO: we need to check the type!!
-    return Builder.CreateLoad(idNode->llvm_type,gvar, var + "_load");
-
-
-
-  }
-
- private:
-  std::string var;
-  int offset;
-};
 
 
 
@@ -1308,33 +1483,10 @@ class StringConst : public Lvalue {
   }
 
 
-
-
  private:
   std::string var;
 };
 
-
-class ArrayElem : public Lvalue {
- public: /*need to support arrays too!*/
-  ArrayElem(AST *lhs, Expr *rhs): var(lhs), expr(rhs) {}
-  ~ArrayElem() { delete var; delete expr; }
-  void printAST(std::ostream &out) const override {
-    out << "ArrayElem(" << *var << ", " << *expr << ")";
-  }
-//   void sem() override {
-//     STEntry *e = st.lookup(var);
-//     expr->check_type(e->type);
-//     offset = e->offset;
-//   }
-//   void execute() const override {
-//     rt_stack[offset] = expr->eval();
-//   }
- private:
-  AST *var;
-  Expr *expr;
-  int offset;
-};
 
 
 
