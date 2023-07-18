@@ -417,6 +417,7 @@ class VarDec : public Stmt {
       idNode->decl_type = DECL_var;
       idNode->var = gVar;
       idNode->llvm_type = itype;
+      idNode->assigned = false;
 
       std::clog << "Created node" << std::endl;
       st.insertNode(idNode);
@@ -514,6 +515,7 @@ class Lvalue : public Expr {
     Lvalue() {}
     virtual std::string getName() { std::clog << "Called Lvalue getName!" << std::endl; return ""; }
     virtual Value* compileAssign() { std::clog << "Called Lvalue compileAssign!" << std::endl; return nullptr; }
+    virtual void updatelookup() {}
 //  public:
 //   virtual void execute() const = 0;
 };
@@ -530,8 +532,11 @@ class IdLval : public Lvalue {
     return var;
   }
 
+  void updatelookup(){
+      node->assigned = true;
+  }
 
-  Value* compile() override{
+  Value* compileAssign() override{
     
     Node* idNode = st.lookupNode(var);
     if(idNode == nullptr){
@@ -541,17 +546,31 @@ class IdLval : public Lvalue {
 
     Value * gvar = idNode->var;
 
+    node = idNode;
 
     return gvar;
+    
     // TODO: we need to check the type!!
-    //return Builder.CreateLoad(idNode->llvm_type,gvar, var + "_load");
-
-
+    //
 
   }
 
-  Value *compileAssign() {
-    return compile();
+  Value *compile() {
+    std::clog << "Compiling IdLval!" << std::endl;
+
+
+    Value *gvar = compileAssign();
+
+
+    if(!node->assigned){
+      std::clog << "Error, tried to access a variable that isnt assigned" << std::endl;
+      exit(2);
+    }
+
+    return Builder.CreateLoad(node->llvm_type,gvar, var + "_load");
+
+
+
   }
 
   Node *compileArray() override{
@@ -562,6 +581,7 @@ class IdLval : public Lvalue {
       exit(1);
     }
 
+    
     return idNode;
 
 
@@ -569,6 +589,9 @@ class IdLval : public Lvalue {
   }
 
  private:
+
+  Node *node;
+
   std::string var;
   int offset;
 };
@@ -661,11 +684,6 @@ class Assign : public Stmt {
   
   Value* compile() override {
 
-    // char name[] = { var, '_', 'p', 't', 'r', '\0' };
-    // Value *lhs = Builder.CreateGEP(TheVars, {c32(0), c32(var - 'a')}, name);
-    // 
-    // Builder.CreateStore(rhs, lhs);
-
 
     std::clog << "Assign compile: Current Scope: " << st.currentScope()->name  << std::endl;
 
@@ -673,23 +691,22 @@ class Assign : public Stmt {
 
     std::clog << "Variable name: "<< var->getName() << std::endl;
 
-    // Node *idNode = st.lookupNode(var->getName());
-
-
-
-
-
-    //Value *rhs = expr->compile();
-
 
     Value *rhs = expr->compile();
 
+
+
     Value *lhs = var->compileAssign();
+
+    var->updatelookup();
+
 
     std::clog << "Compiled rhs" << std::endl;
 
     // Store the constant value into the alloca.
     Builder.CreateStore(rhs, lhs);
+
+    std::clog << "Created store!" << std::endl;
 
 
 
@@ -703,18 +720,7 @@ class Assign : public Stmt {
 
 };
 
-class While : public Stmt {
- public:
-  While(Expr *e, Stmt *s): expr(e), stmt(s) {}
-  ~While() { delete expr; delete stmt; }
-  void printAST(std::ostream &out) const override {
-    out << "While(" << *expr << ", " << *stmt << ")";
-  }
 
- private:
-  Expr *expr;
-  Stmt *stmt;
-};
 
 class Return : public Stmt {
  public:
@@ -722,6 +728,11 @@ class Return : public Stmt {
   ~Return() { delete expr;  }
   void printAST(std::ostream &out) const override {
     out << "Return(" << *expr << ")";
+  }
+
+  Value *compile() override{
+
+    return Builder.CreateRet(expr->compile());
   }
 
  private:
@@ -818,6 +829,68 @@ class If : public Stmt {
 };
 
 
+class While : public Stmt {
+ public:
+  While(Expr *e, Stmt *s): cond(e), stmt(s) {}
+  ~While() { delete cond; delete stmt; }
+  void printAST(std::ostream &out) const override {
+    out << "While(" << *cond << ", " << *stmt << ")";
+  }
+
+  Value *compile() override{
+    std::clog <<"while compile" << std::endl;
+
+
+    BasicBlock *originalBB = Builder.GetInsertBlock();
+
+    Function *TheFunction = originalBB->getParent();
+    
+    BasicBlock *ConditionBB =
+        BasicBlock::Create(TheContext, "condition", TheFunction);
+
+    BasicBlock *DoBB =
+        BasicBlock::Create(TheContext, "do", TheFunction);
+
+    BasicBlock *AfterBB =
+      BasicBlock::Create(TheContext, "after", TheFunction);
+
+
+    //start from condition
+    Builder.CreateBr(ConditionBB);
+
+    Builder.SetInsertPoint(ConditionBB);
+
+    Value *condition = cond->compile();
+
+    Builder.CreateCondBr(condition, DoBB, AfterBB);
+
+
+    //make the do part
+
+    Builder.SetInsertPoint(DoBB);
+    std::clog << "About top stmt compile: " << std::endl;
+
+    //TODO: figure out if there is some better way other than doing this...
+    StmtList* stmtList = dynamic_cast<StmtList*>(stmt);
+
+    stmtList->compile();
+
+    Builder.CreateBr(ConditionBB);
+
+
+
+    Builder.SetInsertPoint(AfterBB);
+
+
+
+
+    return nullptr;
+  }
+
+ private:
+  Expr *cond;
+  Stmt *stmt;
+};
 
 class BinOp : public Expr {
     //also take care of conds 
@@ -1015,6 +1088,10 @@ class FunctionHeader : public Stmt {
     out << "FunctionHeader("<< Tid<< ", " << *fpardef_list << ", " << type << ")";
   }
 
+  DataType getReturnType(){
+    return type;
+  }
+
   Value* compile() override{
       std::clog << "FunctionHeader compile: " << std::endl;
       fpardef_list->compileVector();
@@ -1081,10 +1158,25 @@ class FunctionDef : public Stmt {
 
     // Make the function type:  double(double,double) etc.
 
+    DataType dtype = header->getReturnType();
+
 
     Type *voidType = Type::getVoidTy(TheContext);
 
-    FunctionType *FT = FunctionType::get(voidType,{},false);
+    Type *type;
+
+    if(dtype == TYPE_nothing){
+      type = voidType;
+    }else if(dtype == TYPE_int){
+      type = i32;
+    }else if(dtype == TYPE_char){
+      type = i8;
+    }else{
+      std::clog << "Error, couldnt find type!" << std::endl;
+      exit(2);
+    }
+
+    FunctionType *FT = FunctionType::get(type,{},false);
 
 
 
@@ -1117,6 +1209,7 @@ class FunctionDef : public Stmt {
 
 
 
+
     st.insertNode(functionNode,DECL_func);
 
 
@@ -1132,7 +1225,9 @@ class FunctionDef : public Stmt {
     stmt_list->compile();
 
     //TODO: we should only do this if no return in stmt_list!
-    Builder.CreateRetVoid();
+    //maybe it works that way too cause worst case we have doulbe ret
+    if(dtype == TYPE_nothing)
+      Builder.CreateRetVoid();
 
     Builder.SetInsertPoint(previousBB);
     // 
