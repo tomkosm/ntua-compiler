@@ -216,6 +216,7 @@ inline std::ostream &operator<<(std::ostream &out, const AST &ast) {
 
 class Expr : public AST {
  public:
+  virtual Value* compileAssign() { std::clog << "Called Lvalue compileAssign!" << std::endl; return nullptr; }
 
  void printAST(std::ostream &out) const override {
     out << "Expr(empty)";
@@ -1260,7 +1261,7 @@ class FunctionDef : public Stmt {
     std::vector<Type*> argTypes = {};
     for(FuncArg *arg : args){
       //TODO: handle ref, pass as pointer
-
+ 
 
       Node *node = new Node();
       node->name = arg->name;
@@ -1268,12 +1269,15 @@ class FunctionDef : public Stmt {
       node->type = arg->type;
       node->llvm_type = getLlvmType(arg->type);
       node->assigned = true;//we do this since its arguments and the args are assigned
-      node->isPointer = false;
+      node->isPointer = arg->ref;
 
 
       argnodes.push_back(node);
-      argTypes.push_back(node->llvm_type);
-
+      if(arg->ref){
+        argTypes.push_back(PointerType::get(node->llvm_type, 0));
+      }else{
+        argTypes.push_back(node->llvm_type);
+      }
 
 
     }
@@ -1526,6 +1530,10 @@ class ExprList : public Expr {
     out << ")";
   }
 
+  std::deque<Expr *> getExprList() const {
+    return expr_list;
+  }
+
   std::vector<Value*> compileVector() {
     std::vector<Value*> args;
 
@@ -1552,10 +1560,44 @@ class FuncCall : public Stmt, public Expr {
   Value* compile() override{
     std::clog << "Compiling function call: " << id << std::endl;
 
-    std::vector<Value*> args = expr_list->compileVector();
-
+    // std::vector<Value*> args = expr_list->compileVector();
+    std::vector<Value*> args;
 
     Node* functionNode = st.lookupNode(id, DECL_func);
+
+    if(functionNode == nullptr){
+
+      args = expr_list->compileVector();
+
+    }else{
+      //argslist
+      std::deque<Expr *> exprlist = expr_list->getExprList();
+
+
+      std::clog << "Getting args" << std::endl;
+      std::vector<FuncArg *> funcargs = functionNode->funcargs;
+
+      std::clog << "Got args" << std::endl;
+
+
+      int i = 0;
+      for(auto &a : funcargs) {
+        //if pointer compileAssign
+
+        if(a->ref){
+          args.push_back(exprlist[i]->compileAssign());
+        }else{
+          args.push_back(exprlist[i]->compile());
+        }
+
+        i++;
+
+      }
+    }
+
+
+
+
 
     //
     // std::clog << "Funccall!! : " << functionNode->funcargs.size() << std::endl;
