@@ -51,6 +51,21 @@ class AST {
   virtual Node *compileArray() {}
   std::string getName(){}
 
+  Type* getLlvmType(DataType dtype){
+    if(dtype == TYPE_int)
+        return Type::getInt32Ty(TheContext);
+    else if(dtype == TYPE_char)
+        return Type::getInt8Ty(TheContext);
+    else if(dtype == TYPE_nothing)
+        return Type::getVoidTy(TheContext);
+    else{
+        std::clog << "Error, couldnt find type!" << std::endl;
+        exit(2);
+    }
+      
+  }
+
+
   void llvm_compile_and_dump(bool optimize=false) {
     // Initialize
     TheModule = std::make_unique<Module>("Grace", TheContext);
@@ -354,6 +369,10 @@ class VarDec : public Stmt {
     out << "VarDec(" << *id_list << ": " << *type << ")";
   }
 
+  std::vector<Id *> getIds() const { return id_list->getIds(); }
+
+
+
   Value* compile() override {
 
     Type * itype;
@@ -362,7 +381,7 @@ class VarDec : public Stmt {
     DataType dtype = type->getType();
 
 
-    //TODO: handle arrays
+
     if(dtype == TYPE_int){
       itype = i32;
       initializerSize = 32;
@@ -418,6 +437,7 @@ class VarDec : public Stmt {
       idNode->var = gVar;
       idNode->llvm_type = itype;
       idNode->assigned = false;
+      idNode->isPointer = true;
 
       std::clog << "Created node" << std::endl;
       st.insertNode(idNode);
@@ -429,6 +449,9 @@ class VarDec : public Stmt {
     return nullptr;
   }
 
+  Value *compileFuncParams(){
+
+  }
 
  private:
   IdList *id_list;
@@ -567,8 +590,11 @@ class IdLval : public Lvalue {
       exit(2);
     }
 
-    return Builder.CreateLoad(node->llvm_type,gvar, var + "_load");
-
+    if(!node->isPointer){
+      return gvar;
+    }else{
+      return Builder.CreateLoad(node->llvm_type,gvar, var + "_load");
+    }
 
 
   }
@@ -971,6 +997,9 @@ class Ref : public Stmt {
     out << "Ref(" << refExists << ")";
   }
 
+  bool getRef(){
+    return refExists;
+  }
   private:
     bool refExists;
 };
@@ -992,6 +1021,19 @@ class FparType : public Stmt {
     out << "FparType("<< type<< ", " << arrySizeEmpty << ", " << *array_size << ")";
 
   }
+
+  DataType getType(){
+    return type;
+  }
+
+  bool isArray(){
+    return !arrySizeEmpty;
+  }
+
+  ArraySize *getArraySize(){
+    return array_size;
+  }
+
 
   private:
 
@@ -1018,9 +1060,31 @@ class FparDef : public Stmt {
   Value* compile() override{
     std::clog << "FparDef compile: " << std::endl;
 
-    Value * idList = id_list->compile();
+    return nullptr;
+  }
+
+  std::vector<FuncArg *> getArgs(){
+    std::vector<Id *> ids = id_list->getIds();
+
+    std::vector<FuncArg *> args;
+
+    for(Id *id : ids){
+      FuncArg *arg = new FuncArg();
+      arg->type = fpar_type->getType();
+      arg->isArray = fpar_type->isArray();
+      arg->name = id->getName();
+      arg->isArray = fpar_type->isArray();
+      arg->ref = ref->getRef();
+
+      args.push_back(arg);
+
+
+    }
+
+    //Value * idList = id_list->compile();
     std::clog << "FparDef compiled! " << std::endl;
-    return idList;
+    // return id_list;
+    return args;
   }
 
   private:
@@ -1068,8 +1132,27 @@ class FparDefList : public Stmt {
     return args;
   }
 
+  std::vector<FuncArg *> getArgs(){
+    std::vector<FuncArg *> args ={};
+
+    for(const auto &d : fpardef_list) {
+
+      std::vector<FuncArg *> toMergeArgs = d->getArgs();
+      //b.insert(b.end(), a.begin(), a.end());
+      //merge arrays
+
+      args.insert(args.end(),toMergeArgs.begin(),toMergeArgs.end());
+    }
+
+
+
+    return args;
+  }
+
   private:
     std::vector<FparDef *> fpardef_list;
+
+
 };
 
 
@@ -1097,6 +1180,10 @@ class FunctionHeader : public Stmt {
       fpardef_list->compileVector();
 
       return nullptr;
+  }
+
+  std::vector<FuncArg *> getArgs(){
+    return fpardef_list->getArgs();
   }
 
   public:
@@ -1161,29 +1248,57 @@ class FunctionDef : public Stmt {
     DataType dtype = header->getReturnType();
 
 
-    Type *voidType = Type::getVoidTy(TheContext);
+    Type *type = getLlvmType(dtype);
 
-    Type *type;
 
-    if(dtype == TYPE_nothing){
-      type = voidType;
-    }else if(dtype == TYPE_int){
-      type = i32;
-    }else if(dtype == TYPE_char){
-      type = i8;
-    }else{
-      std::clog << "Error, couldnt find type!" << std::endl;
-      exit(2);
+
+    //args
+
+    std::vector<Node*> argnodes;
+
+    std::vector<FuncArg *> args = header->getArgs();
+    std::vector<Type*> argTypes = {};
+    for(FuncArg *arg : args){
+      //TODO: handle ref, pass as pointer
+
+
+      Node *node = new Node();
+      node->name = arg->name;
+      node->decl_type = DECL_var;
+      node->type = arg->type;
+      node->llvm_type = getLlvmType(arg->type);
+      node->assigned = true;//we do this since its arguments and the args are assigned
+      node->isPointer = false;
+
+
+      argnodes.push_back(node);
+      argTypes.push_back(node->llvm_type);
+
+
+
     }
 
-    FunctionType *FT = FunctionType::get(type,{},false);
+
+    std::clog << "Func arg size: " << args.size() << std::endl;
+
+
+
+
+    FunctionType *FT = FunctionType::get(type,argTypes,false);
 
 
 
     Function *F = Function::Create(FT, Function::ExternalLinkage, header->Tid,TheModule.get());
 
 
-    //TODO: only if first function
+    //get arguments
+    unsigned Idx = 0;
+    for (auto &Arg : F->args()) {
+      Arg.setName(argnodes[Idx]->name);
+      argnodes[Idx]->var = &Arg;
+      Idx++;
+    }
+
 
     std::clog << "First Function: " << firstFunction << std::endl;
     if(firstFunction){
@@ -1206,6 +1321,7 @@ class FunctionDef : public Stmt {
     functionNode->name = header->Tid;
     functionNode->decl_type = DECL_func;
     functionNode->function = F;
+    functionNode->funcargs = header->getArgs();
 
 
 
@@ -1215,10 +1331,15 @@ class FunctionDef : public Stmt {
 
     st.createScope(header->Tid); //add the name in scope 
     
+    //adding arguments in the st
+    for(Node *node : argnodes){
+      st.insertNode(node,DECL_var);
+    }
+
+
     std::clog << "Current Scope: " <<  st.currentScope()->name << std::endl;
 
-    //TODO: figure out how we make arguments in llvm!
-    // header->compile();
+    
 
     localdef_list->compile();
 
@@ -1435,6 +1556,10 @@ class FuncCall : public Stmt, public Expr {
 
 
     Node* functionNode = st.lookupNode(id, DECL_func);
+
+    //
+    // std::clog << "Funccall!! : " << functionNode->funcargs.size() << std::endl;
+
 
     Function *func;
 
