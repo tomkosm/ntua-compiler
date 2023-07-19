@@ -267,7 +267,7 @@ inline std::ostream &operator<<(std::ostream &out, const AST &ast) {
 class Expr : public AST {
  public:
   virtual Value* compileAssign() { std::clog << "Called Lvalue compileAssign!" << std::endl; return nullptr; }
-  virtual std::vector<int> getArraySize() { std::clog << "Called Lvalue getArraySize!" << std::endl;}
+  virtual std::vector<int> getArraySize() { std::clog << "Called default Lvalue getArraySize!" << std::endl; exit(2);}
  void printAST(std::ostream &out) const override {
     out << "Expr(empty)";
   }
@@ -643,9 +643,10 @@ class IdLval : public Lvalue {
     Value *gvar = compileAssign();
 
 
+    //TODO: figure out if we need this and also make it work for refs too
     if(!node->assigned){
       std::clog << "Error, tried to access a variable that isnt assigned" << std::endl;
-      exit(2);
+      //exit(2);
     }
 
     if(!node->isPointer){
@@ -1243,7 +1244,8 @@ class FparDefList : public Stmt {
   ~FparDefList() {
     for (FparDef *d : fpardef_list) delete d;
   }
-  void add(FparDef *d) { fpardef_list.push_front(d); }
+  void add(FparDef *d) { fpardef_list.push_back(d); }
+  void add_front(FparDef *d) { fpardef_list.push_front(d); }
 
   void printAST(std::ostream &out) const override {
     out << "FparDefList(";
@@ -1283,7 +1285,6 @@ class FparDefList : public Stmt {
 
       args.insert(args.end(),toMergeArgs.begin(),toMergeArgs.end());
     }
-
 
 
     return args;
@@ -1747,8 +1748,11 @@ class FuncCall : public Stmt, public Expr {
         if(a->ref){
           //we need the array size
           args.push_back(exprlist[i]->compileAssign());
-          std::vector<int> arr = exprlist[i]->getArraySize();
-          std::clog << "Array size:!!!!!!!!  " << arr.size() << std::endl;
+          
+          std::clog << "Argument ref, name: "<< a->name << std::endl;
+
+          // std::vector<int> arr = exprlist[i]->getArraySize();
+          // std::clog << "Array size:!!!!!!!!  " << arr.size() << std::endl;
         }else{
           args.push_back(exprlist[i]->compile());
         }
