@@ -20,6 +20,21 @@ enum DeclType { DECL_var, DECL_func };
 // };
 
 
+//funcarg
+
+
+struct FuncArg{
+    bool ref;
+    std::string name;
+
+    DataType type;
+    bool isArray;
+    
+    // ArraySize *array_size;
+
+};
+
+
 
 
 struct Node{
@@ -27,9 +42,20 @@ struct Node{
     DeclType decl_type;
     std::string name;
 
-    GlobalVariable *var;
+    Value *var;
     Function *function;
     llvm::Type *llvm_type;
+
+    //for func
+    std::vector<FuncArg *> funcargs;
+    std::vector<int> array_size;
+    bool isPointer;
+
+    bool isArgument;
+
+
+
+    bool assigned;
 };
 
 
