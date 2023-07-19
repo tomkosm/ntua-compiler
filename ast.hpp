@@ -51,17 +51,31 @@ class AST {
   virtual Node *compileArray() {}
   std::string getName(){}
 
-  Type* getLlvmType(DataType dtype){
+  Type* getLlvmType(DataType dtype,bool isArray=false){
+    std::clog << "hey" << std::endl;
+    Type *itype;
+
     if(dtype == TYPE_int)
-        return Type::getInt32Ty(TheContext);
+        itype =  Type::getInt32Ty(TheContext);
     else if(dtype == TYPE_char)
-        return Type::getInt8Ty(TheContext);
+        itype = Type::getInt8Ty(TheContext);
     else if(dtype == TYPE_nothing)
-        return Type::getVoidTy(TheContext);
+        itype = Type::getVoidTy(TheContext);
     else{
         std::clog << "Error, couldnt find type!" << std::endl;
         exit(2);
     }
+    if(isArray){
+      //TODO: handle multi dim?
+        std::clog << "Hereeee!!!!!!!" << std::endl;
+        ArrayType* ArrayTy = ArrayType::get(itype, 0);
+        itype = ArrayTy;
+    }
+
+    return itype;
+
+
+
       
   }
 
@@ -121,6 +135,14 @@ class AST {
 
 
 
+    FunctionType *strlen_type =
+      FunctionType::get(i64, {PointerType::get(i8, 0)}, false);
+
+    Thestrlen =
+      Function::Create(strlen_type, Function::ExternalLinkage,
+                       "strlen", TheModule.get());
+
+
 
 
 
@@ -178,7 +200,10 @@ class AST {
   static Function *TheWriteString;
 
 
-    static Function *TheReadInteger;
+  static Function *TheReadInteger;
+
+  static Function *Thestrlen;
+
 
 
   static Type *i8;
@@ -217,7 +242,7 @@ inline std::ostream &operator<<(std::ostream &out, const AST &ast) {
 class Expr : public AST {
  public:
   virtual Value* compileAssign() { std::clog << "Called Lvalue compileAssign!" << std::endl; return nullptr; }
-
+  virtual std::vector<int> getArraySize() { std::clog << "Called Lvalue getArraySize!" << std::endl;}
  void printAST(std::ostream &out) const override {
     out << "Expr(empty)";
   }
@@ -252,7 +277,7 @@ class IdList : public AST {
   ~IdList() {
     for (Id *d : id_list) delete d;
   }
-  void add(Id *d) { id_list.push_back(d); }
+  void add(Id *d) { id_list.push_front(d); }
 
   void printAST(std::ostream &out) const override {
     out << "IdList(";
@@ -267,7 +292,10 @@ class IdList : public AST {
   }
 
   //TODO: needs to return the type of each!
-  std::vector<Id *> getIds() const { return id_list; }
+  std::vector<Id *> getIds() const { 
+
+    return std::vector<Id*>(id_list.begin(), id_list.end()); 
+    }
 
 
     std::vector<Value*> compileVector() {
@@ -288,7 +316,8 @@ class IdList : public AST {
 
 
   private:
-    std::vector<Id *> id_list;
+    std::deque<Id *> id_list;
+
 };
 
 
@@ -421,9 +450,9 @@ class VarDec : public Stmt {
         *TheModule,
         itype,
         false, // isConstant
-        GlobalValue::PrivateLinkage,
+        GlobalValue::ExternalLinkage,
         Initializer, // Initializer
-        "gVar"
+        id->getName()+"_var"
       );
 
 
@@ -552,7 +581,6 @@ class IdLval : public Lvalue {
   }
 
   std::string getName() override {
-    std::clog << "IDLVAL var: "  << std::endl;
     return var;
   }
 
@@ -580,7 +608,7 @@ class IdLval : public Lvalue {
   }
 
   Value *compile() {
-    std::clog << "Compiling IdLval!" << std::endl;
+    std::clog << "Compiling IdLval!!!!!!!!!" << std::endl;
 
 
     Value *gvar = compileAssign();
@@ -615,6 +643,17 @@ class IdLval : public Lvalue {
 
   }
 
+  std::vector<int> getArraySize() override{
+    Node* idNode = st.lookupNode(var);
+    if(idNode == nullptr){
+      std::cerr << "Error: variable " << var << " not declared" << std::endl;
+      exit(1);
+    }
+
+    return idNode->array_size;
+
+  }
+
  private:
 
   Node *node;
@@ -638,6 +677,10 @@ class ArrayElem : public Lvalue {
     return var->getName();
   }
 
+  // std::vector<int> getArraySize(){
+  //   return 
+  // }
+
   Value *compileAssign(){
     std::clog << "Compiling compileAssign array element: " << *var << std::endl;
 
@@ -647,17 +690,30 @@ class ArrayElem : public Lvalue {
 
     std::vector<Value*> arrayIndex = {c32(0), index};
 
-    Value *elementPtr = Builder.CreateGEP(array->llvm_type,array->var, arrayIndex, "arrayElem");
+
+
+
+
+    node = array;
+
+    std::clog << "before gep!!!!!!!!!!!!!!!! " << var->getName() << std::endl;
+    //Value *v = Builder.CreateInBoundsGEP({i8},array->var,arrayIndex,var->getName()+"_arrayElem_arg");
+    std::clog << "after gep" << std::endl;
+    // std::clog << *array->var->getType() << std::endl;
+    //TODO: would first work for both?
+    // if(array->isPointer){
+
+
+        //ArrayType* ArrayTy = ArrayType::get(i8, 0);
+
+
+
+       return Builder.CreateInBoundsGEP(array->llvm_type,array->var,arrayIndex,var->getName()+"_arrayElem_arg");
+    // }else{
+    //   Value *elementPtr = Builder.CreateGEP(array->llvm_type,array->var, arrayIndex, var->getName()+"_arrayElem");     
     
-
-
-    //used for compile()
-    this->datatype = array->type;
-    
-    return elementPtr;
-
-    //
-    //return elementValue;
+    //   return elementPtr;
+    // }
 
   }
 
@@ -666,22 +722,13 @@ class ArrayElem : public Lvalue {
     std::clog << "Compiling array element: " << *var << std::endl;
     
     Value *elementPtr = compileAssign();
+        std::clog << "HEREER" << std::endl;
+
+
+    Type* elementType = getLlvmType(node->type); //?
     
 
-    Type* elementType;
-    if(this->datatype == TYPE_int){
-      elementType = i32;
-    }
-    else if(this->datatype == TYPE_char){
-      elementType = i8;
-    }
-    else{
-      std::cerr << "Error: invalid type" << std::endl;
-      exit(1);
-    }
-
-
-    Value* elementValue = Builder.CreateLoad({i32},elementPtr, "elementValue");
+    Value* elementValue = Builder.CreateLoad(elementType,elementPtr, "elementValue");
 
     return elementValue;
 
@@ -694,6 +741,8 @@ class ArrayElem : public Lvalue {
   Expr *expr;
 
   DataType datatype;
+  Node *node;
+
 
   int offset;
 };
@@ -1028,11 +1077,12 @@ class FparType : public Stmt {
   }
 
   bool isArray(){
-    return !arrySizeEmpty;
+    return array_size->getSizes().size() != 0 || arrySizeEmpty;
   }
 
-  ArraySize *getArraySize(){
-    return array_size;
+
+  std::vector<int> getArraySizes(){
+    return array_size->getSizes();
   }
 
 
@@ -1073,8 +1123,9 @@ class FparDef : public Stmt {
       FuncArg *arg = new FuncArg();
       arg->type = fpar_type->getType();
       arg->isArray = fpar_type->isArray();
+      // arg->array_size = fpar_type->getArraySizes();
       arg->name = id->getName();
-      arg->isArray = fpar_type->isArray();
+
       arg->ref = ref->getRef();
 
       args.push_back(arg);
@@ -1104,7 +1155,7 @@ class FparDefList : public Stmt {
   ~FparDefList() {
     for (FparDef *d : fpardef_list) delete d;
   }
-  void add(FparDef *d) { fpardef_list.push_back(d); }
+  void add(FparDef *d) { fpardef_list.push_front(d); }
 
   void printAST(std::ostream &out) const override {
     out << "FparDefList(";
@@ -1151,7 +1202,7 @@ class FparDefList : public Stmt {
   }
 
   private:
-    std::vector<FparDef *> fpardef_list;
+    std::deque<FparDef *> fpardef_list;
 
 
 };
@@ -1267,12 +1318,15 @@ class FunctionDef : public Stmt {
       node->name = arg->name;
       node->decl_type = DECL_var;
       node->type = arg->type;
-      node->llvm_type = getLlvmType(arg->type);
+      std::clog << "New node! :" << arg->name << " is Array: " << arg->isArray   << std::endl;
+      node->llvm_type = getLlvmType(arg->type,arg->isArray);
       node->assigned = true;//we do this since its arguments and the args are assigned
       node->isPointer = arg->ref;
 
 
+
       argnodes.push_back(node);
+      std::clog << "Arg node: " << node->name << "is ref: "<<arg->ref <<  "is array: " <<arg->isArray << std::endl;
       if(arg->ref){
         argTypes.push_back(PointerType::get(node->llvm_type, 0));
       }else{
@@ -1298,7 +1352,7 @@ class FunctionDef : public Stmt {
     //get arguments
     unsigned Idx = 0;
     for (auto &Arg : F->args()) {
-      Arg.setName(argnodes[Idx]->name);
+      Arg.setName(argnodes[Idx]->name+"_funcarg");
       argnodes[Idx]->var = &Arg;
       Idx++;
     }
@@ -1544,6 +1598,17 @@ class ExprList : public Expr {
     return args;
   }
 
+    std::vector<Value*> compileAssignVector() {
+    std::vector<Value*> args;
+
+    for(const auto &d : expr_list) {
+        args.push_back(d->compileAssign());
+    }
+
+    return args;
+  }
+
+
   private:
     std::deque<Expr *> expr_list;
 };
@@ -1567,7 +1632,7 @@ class FuncCall : public Stmt, public Expr {
 
     if(functionNode == nullptr){
 
-      args = expr_list->compileVector();
+
 
     }else{
       //argslist
@@ -1585,7 +1650,10 @@ class FuncCall : public Stmt, public Expr {
         //if pointer compileAssign
 
         if(a->ref){
+          //we need the array size
           args.push_back(exprlist[i]->compileAssign());
+          std::vector<int> arr = exprlist[i]->getArraySize();
+          std::clog << "Array size:!!!!!!!!  " << arr.size() << std::endl;
         }else{
           args.push_back(exprlist[i]->compile());
         }
@@ -1607,7 +1675,8 @@ class FuncCall : public Stmt, public Expr {
 
     if (functionNode == nullptr) {
         if(id == "writeInteger"){
-          
+          args = expr_list->compileVector();
+
           //cast vector Value to 64 bit
           std::vector<Value*> args64;
           for(auto &a : args) {
@@ -1618,24 +1687,37 @@ class FuncCall : public Stmt, public Expr {
           func = TheWriteInteger;
         }
         else if(id == "writeChar"){
+          args = expr_list->compileVector();
 
           func = TheWriteChar;
 
         }
         else if(id == "writeString"){
-                 
-          
-          std::vector<Value*> argPointer = {Builder.CreateGEP(args[0]->getType(),args[0], {c32(0), c32(0)}, "nl")};
-          
+          //args = {expr_list[0].compileAssign()};
+          args = expr_list->compileAssignVector();
 
-          args = argPointer;
+
+          std::clog << "Writing string" << std::endl;
+          
+          //std::vector<Value*> argPointer = {Builder.CreateGEP(args[0]->getType(),args[0], {c32(0), c32(0)}, "nl")};
+                    std::clog << "Writing string2" << std::endl;
+
+
+          //args = argPointer;
 
           func = TheWriteString;
 
         }
         else if(id == "readInteger"){
-          
+          args = expr_list->compileVector();
+
           func = TheReadInteger;
+        }
+        else if(id == "strlen"){
+          args = expr_list->compileAssignVector();
+
+          func = Thestrlen;
+
         }
           else{
           std::cerr << "Function " << id << " not declared" << std::endl;
@@ -1652,7 +1734,7 @@ class FuncCall : public Stmt, public Expr {
     Value *res = Builder.CreateCall(func, args);
 
 
-    if(id == "readInteger"){
+    if(id == "readInteger" || id == "strlen"){
       return Builder.CreateTrunc(res, i32, "cast");
     }
     else{
@@ -1736,12 +1818,22 @@ class StringConst : public Lvalue {
 
     GlobalVariable *gv = new GlobalVariable(*TheModule,
                                                       strConstant->getType(),
-                                                      true,
+                                                      false, //we dont trully want this as constant.. 
                                                       GlobalValue::PrivateLinkage,
                                                       strConstant);
 
+
     return gv;
 
+  }
+  Value* compileAssign() override{
+    return compile();
+  }
+
+  std::vector<int> getArraySize() override{
+    std::vector<int> v;
+    v.push_back(var.size());
+    return v;
   }
 
 
