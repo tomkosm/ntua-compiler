@@ -46,9 +46,9 @@ class AST {
  public:
   virtual ~AST() = default;
   virtual void printAST(std::ostream &out) const = 0;
-  virtual Value* compile() const {std::clog << "Called ast const compile" <<std::endl; return nullptr; }
-  virtual Value* compile()  { std::clog << "Called ast compile" <<std::endl; return nullptr; }
-  virtual Node *compileArray() {}
+  virtual Value* compile() const {std::clog << "Called ast const compile" <<std::endl; exit(2); return nullptr; }
+  virtual Value* compile()  { std::clog << "Called ast compile" <<std::endl; exit(2); return nullptr; }
+  virtual Node *compileArray() {std::clog << "Called ast compilearray" <<std::endl;}
   std::string getName(){}
 
   Type* getLlvmType(DataType dtype,bool isArray=false){
@@ -160,6 +160,31 @@ class AST {
     compile();
 
     std::clog << "Compiled!" << std::endl;
+
+
+    // We should remove any empty bb's, unsafe to remove while iterating
+    std::vector<BasicBlock*> EmptyBBs;
+
+    for (Function& Func : *TheModule) {
+        for (BasicBlock& BB : Func) {
+            if (BB.empty()) {
+                EmptyBBs.push_back(&BB);
+            }
+        }
+    }
+
+    for (BasicBlock* BB : EmptyBBs) {
+        BB->eraseFromParent();
+    }
+
+
+    // Print the names of all basic blocks
+    // for (BasicBlock* BB : BasicBlocks) {
+    //     std::cout << "Basic Block Name: " << BB->getName().str() << std::endl;
+    // }
+
+
+
 
     Builder.SetInsertPoint(BB);
     Builder.CreateRet(c32(0));
@@ -326,11 +351,15 @@ class IdList : public AST {
 
 class Stmt : public AST {
  public:
-   void name(){std::clog << "Stmt name" << std::endl;}
+  void name(){std::clog << "Stmt name" << std::endl;}
 
-   void printAST(std::ostream &out) const override {
+
+  virtual Value* compile() override {};
+  void printAST(std::ostream &out) const override {
     out << "Stmt(empty)";
   }
+
+  virtual bool isReturn(){return false;}
 
 //   virtual void execute() const = 0;
 };
@@ -805,9 +834,11 @@ class Return : public Stmt {
   void printAST(std::ostream &out) const override {
     out << "Return(" << *expr << ")";
   }
-
+  bool isReturn() override{
+    return true;
+  }
   Value *compile() override{
-
+    std::clog << "Compiling return! " << std::endl;
     return Builder.CreateRet(expr->compile());
   }
 
@@ -826,8 +857,17 @@ class StmtList : public Stmt {
   void name(){std::clog << "StmtList name" << std::endl;}
   //TODO: We need to check that the order of statements is correct! SUPER IMPORTANT!
 
+  bool isReturn() override{
+    for (Stmt *s : stmt_list){
+      if(s->isReturn()){
+        return true;
+      }
+    }
+    return false;
 
-  Value* compile() const override {
+  }
+
+  Value* compile() override {
     std::clog << "StmtList compile: " << std::endl;
 
     for (Stmt *s : stmt_list) s->compile();
@@ -879,19 +919,67 @@ class If : public Stmt {
     Function *TheFunction = Builder.GetInsertBlock()->getParent();
     BasicBlock *ThenBB =
       BasicBlock::Create(TheContext, "then", TheFunction);
-    BasicBlock *ElseBB =
-      BasicBlock::Create(TheContext, "else", TheFunction);
+
+
     BasicBlock *AfterBB =
       BasicBlock::Create(TheContext, "endif", TheFunction);
-    Builder.CreateCondBr(condition, ThenBB, ElseBB);
-    Builder.SetInsertPoint(ThenBB);
-    std::clog << "About to compile stmt" << std::endl;
-    stmtList1->compile();
-    Builder.CreateBr(AfterBB);
-    Builder.SetInsertPoint(ElseBB);
-    if (stmtList2 != nullptr) stmtList2->compile();
-    Builder.CreateBr(AfterBB);
-    Builder.SetInsertPoint(AfterBB);
+
+    //if there is no else statement
+    if(stmt2 == nullptr){
+
+      Builder.CreateCondBr(condition, ThenBB, AfterBB);
+      Builder.SetInsertPoint(ThenBB);
+
+      std::clog << "About to compile stmt" << std::endl;
+
+
+      stmt1->compile();
+
+       //we do this cause llvm doesnt like it if we have a command (br) after return
+      if(!stmt1->isReturn()){
+        Builder.CreateBr(AfterBB);
+        Builder.SetInsertPoint(AfterBB);
+
+      }
+
+    }else{
+      BasicBlock *ElseBB =
+        BasicBlock::Create(TheContext, "else", TheFunction);
+
+      Builder.CreateCondBr(condition, ThenBB, ElseBB);
+      Builder.SetInsertPoint(ThenBB);
+      
+      std::clog << "About to compile stmt" << std::endl;
+
+      stmt1->compile();
+      if(!stmt1->isReturn()){
+        Builder.CreateBr(AfterBB);
+      }
+      Builder.SetInsertPoint(ElseBB);
+
+      std::clog << "About to compile else stmts" << std::endl;
+      stmt2->compile();
+
+      if(stmt2 != nullptr && !stmt1->isReturn()){
+        Builder.CreateBr(AfterBB);
+        Builder.SetInsertPoint(AfterBB);
+
+      }
+
+    }
+
+      
+      Builder.SetInsertPoint(AfterBB);
+
+
+    // if(!stmt1->isReturn())
+    //   Builder.CreateBr(AfterBB);
+
+    
+    // 
+    //   Builder.CreateBr(AfterBB);
+    // Builder.SetInsertPoint(AfterBB);
+
     return nullptr;
 
 
@@ -1408,8 +1496,15 @@ class FunctionDef : public Stmt {
     if(dtype == TYPE_nothing)
       Builder.CreateRetVoid();
 
+
+
+
+
+
     Builder.SetInsertPoint(previousBB);
     // 
+
+    
 
 
     std::clog << "Exiting scope: " << st.currentScope()->name << std::endl;
