@@ -48,7 +48,7 @@ class AST {
   virtual void printAST(std::ostream &out) const = 0;
   virtual Value* compile() const {std::clog << "Called ast const compile" <<std::endl; exit(2); return nullptr; }
   virtual Value* compile()  { std::clog << "Called ast compile" <<std::endl; exit(2); return nullptr; }
-  virtual Node *compileArray() {std::clog << "Called ast compilearray" <<std::endl;}
+  virtual Node *compileArray() {std::clog << "Called ast compilearray" <<std::endl; exit(2);}
   std::string getName(){}
 
   Type* getLlvmType(DataType dtype,bool isArray=false){
@@ -454,21 +454,47 @@ class VarDec : public Stmt {
     std::vector<int> arraysizes = type->getSizes();
     Constant* Initializer;
     ArrayType* ArrayTy;
-
+    std::clog << "Array size: " << arraysizes.size() << std::endl;
     if(arraysizes.size() == 0){
+      //Initializer = 0;
       Initializer = ConstantInt::get(TheContext, llvm::APInt(initializerSize, 0));
 
-    }else if(arraysizes.size() == 1){
-      //wrong need to handle multi dim
-      ArrayTy = ArrayType::get(itype, arraysizes[0]);
-      std::vector<Constant*> constArray(arraysizes[0], ConstantInt::get(TheContext, APInt(32, 0)));
-      Initializer = ConstantArray::get(ArrayTy, constArray);
+    }else if(arraysizes.size() >= 1){
+      //we reverse it so we get last first
 
-      itype = ArrayTy;
+      std::reverse(arraysizes.begin(), arraysizes.end());
+
+
+
+      std::clog << "Array size: " << arraysizes[0] << " " << arraysizes[1] << std::endl;
+      //wrong need to handle multi dim
+      
+      //Type *ltype = itype;
+      Initializer = c32(0);
+
+      std::vector<llvm::Constant*> arrayElems;
+      for(auto size : arraysizes) {
+
+
+        ArrayTy = ArrayType::get(itype, size);
+        itype = ArrayTy;
+
+        arrayElems = {static_cast<unsigned long>(size),Initializer};
+
+        Initializer = ConstantArray::get(ArrayTy,arrayElems);
+
+
+      }
+
+      
+      // std::vector<Constant*> constArray(arraysizes[0], ConstantInt::get(TheContext, APInt(32, 0)));
+      // Initializer = ConstantArray::get(ArrayTy, constArray);
+
+      // itype = ArrayTy;
     }
 
 
-    //issues if multiple same name etc 
+    //TODO: issues if multiple same name etc 
     for(auto id : id_list->getIds()) {
       std::clog << "Compiling VarDec name: " << id->getName() << " Current scope: " << st.currentScope()->name << std::endl; 
 
@@ -598,6 +624,8 @@ class Lvalue : public Expr {
     virtual std::string getName() { std::clog << "Called Lvalue getName!" << std::endl; return ""; }
     virtual Value* compileAssign() { std::clog << "Called Lvalue compileAssign!" << std::endl; return nullptr; }
     virtual void updatelookup() {}
+    virtual std::vector<Value *> getIndexes() {std::clog << "Called Lvalue getIndexes!" << std::endl; exit(2);}
+  
 //  public:
 //   virtual void execute() const = 0;
 };
@@ -658,6 +686,11 @@ class IdLval : public Lvalue {
 
   }
 
+  std::vector<Value *> getIndexes() override{
+    std::vector<Value *> v = {c32(0)};
+    return v;
+  }
+
   Node *compileArray() override{
 
     Node* idNode = st.lookupNode(var);
@@ -716,9 +749,10 @@ class ArrayElem : public Lvalue {
 
     Node *array = var->compileArray();
 
-    Value *index = expr->compile();
 
-    std::vector<Value*> arrayIndex = {c32(0), index};
+
+    std::vector<Value*> arrayIndex = getIndexes();
+
 
 
 
@@ -746,6 +780,19 @@ class ArrayElem : public Lvalue {
     // }
 
   }
+
+  Node *compileArray() override{
+  
+    return var->compileArray();
+  }
+
+  std::vector<Value *> getIndexes() override{
+    std::vector<Value *> indexes = var->getIndexes();
+    indexes.push_back(expr->compile());
+    return indexes;
+  }
+
+
 
     Value *compile() override{
 
@@ -1933,21 +1980,29 @@ class StringConst : public Lvalue {
   Value *compile() override {
     std::clog << "Called StringConst compile!" << std::endl;
 
-    Constant *strConstant = ConstantDataArray::getString(TheContext, processString(var));
+    strConstant = ConstantDataArray::getString(TheContext, processString(var));
 
 
     GlobalVariable *gv = new GlobalVariable(*TheModule,
                                                       strConstant->getType(),
                                                       false, //we dont trully want this as constant.. 
                                                       GlobalValue::PrivateLinkage,
-                                                      strConstant);
+                                                      strConstant,
+                                                      "str_const");
 
 
     return gv;
 
   }
   Value* compileAssign() override{
+    
+
     return compile();
+
+    //Value *gvar = compile();
+
+    //return Builder.CreateLoad(strConstant->getType(),gvar, "str_const_load");
+
   }
 
   std::vector<int> getArraySize() override{
@@ -1959,6 +2014,9 @@ class StringConst : public Lvalue {
 
  private:
   std::string var;
+
+  Constant *strConstant;
+
 };
 
 
