@@ -80,7 +80,7 @@ class AST {
   }
 
 
-  void llvm_compile_and_dump(bool optimize=false) {
+  void llvm_compile_and_dump(bool optimize=true) {
     // Initialize
     TheModule = std::make_unique<Module>("Grace", TheContext);
     
@@ -1426,7 +1426,6 @@ class FunctionDef : public Stmt {
     }
 
 
-    std::clog << "Func arg size: " << args.size() << std::endl;
 
 
 
@@ -1438,13 +1437,6 @@ class FunctionDef : public Stmt {
     Function *F = Function::Create(FT, Function::ExternalLinkage, header->Tid,TheModule.get());
 
 
-    //get arguments
-    unsigned Idx = 0;
-    for (auto &Arg : F->args()) {
-      Arg.setName(argnodes[Idx]->name+"_funcarg");
-      argnodes[Idx]->var = &Arg;
-      Idx++;
-    }
 
 
     std::clog << "First Function: " << firstFunction << std::endl;
@@ -1459,6 +1451,29 @@ class FunctionDef : public Stmt {
 
     BasicBlock *BB = BasicBlock::Create(TheContext, header->Tid, F);
     Builder.SetInsertPoint(BB);
+
+
+    //get arguments
+    //TODO: double check the following!
+    unsigned Idx = 0;
+    for (auto &Arg : F->args()) {
+      Arg.setName(argnodes[Idx]->name+"_funcarg");
+
+      if(argnodes[Idx]->isPointer){
+        argnodes[Idx]->var = &Arg;
+      }
+      else{
+        //null ptr needs to be arraySize if exists!
+        llvm::AllocaInst* Alloca = Builder.CreateAlloca(argnodes[Idx]->llvm_type, nullptr, argnodes[Idx]->name+"_funcarg");
+        //AllocaInst *Alloca = CreateEntryBlockAlloca(F, argnodes[Idx]->name, argnodes[Idx]->llvm_type);
+        Builder.CreateStore(&Arg, Alloca);
+        argnodes[Idx]->var = Alloca;
+        argnodes[Idx]->isPointer = true;
+      }
+
+      Idx++;
+    }
+
 
     std::clog << "Gereee" << std::endl;
 
@@ -1478,6 +1493,8 @@ class FunctionDef : public Stmt {
 
     st.createScope(header->Tid); //add the name in scope 
     
+
+
     //adding arguments in the st
     for(Node *node : argnodes){
       st.insertNode(node,DECL_var);
@@ -1834,7 +1851,11 @@ class FuncCall : public Stmt, public Expr {
 
 
     if(id == "readInteger" || id == "strlen"){
+      
       return Builder.CreateTrunc(res, i32, "cast");
+      // llvm::Value* truncatedValue = Builder.CreateTrunc(res, Builder.getInt32Ty());
+      // return Builder.CreateZExt(truncatedValue, Builder.getInt64Ty());
+
     }
     else{
       return res;
