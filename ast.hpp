@@ -215,8 +215,6 @@ class AST {
   static std::unique_ptr<Module> TheModule;
   static std::unique_ptr<legacy::FunctionPassManager> TheFPM;
 
-  static GlobalVariable *TheVars;
-  static GlobalVariable *TheNL;
   static Function *TheWriteInteger;
 
   static Function *TheWriteChar;
@@ -1365,19 +1363,159 @@ class FunctionHeader : public Stmt {
 
   Value* compile() override{
       std::clog << "FunctionHeader compile: " << std::endl;
-      fpardef_list->compileVector();
+      //fpardef_list->compileVector();
+
+
+    // Make the function type:  double(double,double) etc.
+
+    DataType dtype = getReturnType();
+
+
+    Type *type = getLlvmType(dtype);
+
+
+
+    //args
+
+    std::vector<Node*> argnodes;
+
+    std::vector<FuncArg *> args = getArgs();
+    std::vector<Type*> argTypes = {};
+    for(FuncArg *arg : args){
+      //TODO: handle ref, pass as pointer
+
+
+      Node *node = new Node();
+      node->name = arg->name;
+      node->decl_type = DECL_var;
+      node->type = arg->type;
+      std::clog << "New node! :" << arg->name << " is Array: " << arg->isArray   << std::endl;
+      node->llvm_type = getLlvmType(arg->type,arg->isArray);
+      node->assigned = true;//we do this since its arguments and the args are assigned
+      node->isPointer = arg->ref;
+
+
+
+      argnodes.push_back(node);
+      std::clog << "Arg node: " << node->name << "is ref: "<<arg->ref <<  "is array: " <<arg->isArray << std::endl;
+      if(arg->ref){
+        argTypes.push_back(PointerType::get(node->llvm_type, 0));
+      }else{
+        argTypes.push_back(node->llvm_type);
+      }
+
+
+    }
+
+
+
+
+
+
+    FunctionType *FT = FunctionType::get(type,argTypes,false);
+
+
+
+    Function *F = Function::Create(FT, Function::ExternalLinkage, Tid,TheModule.get());
+
+
+    func = F;
+
+
+    //BasicBlock *previousBB = Builder.GetInsertBlock();
+
+    BasicBlock *previousBB = Builder.GetInsertBlock();
+
+    BasicBlock *BB = BasicBlock::Create(TheContext, Tid, F);
+    
+    Node *functionNode = new Node();
+    functionNode->name = Tid;
+    functionNode->decl_type = DECL_func;
+    functionNode->function = F;
+    functionNode->funcargs = getArgs();
+    functionNode->block = BB;
+
+    fnode = functionNode;
+
+    Builder.SetInsertPoint(BB);
+
+
+    //get arguments
+    //TODO: double check the following!
+    unsigned Idx = 0;
+    for (auto &Arg : F->args()) {
+      Arg.setName(argnodes[Idx]->name+"_funcarg");
+
+      if(argnodes[Idx]->isPointer){
+        argnodes[Idx]->var = &Arg;
+      }
+      else{
+        //null ptr needs to be arraySize if exists!
+        llvm::AllocaInst* Alloca = Builder.CreateAlloca(argnodes[Idx]->llvm_type, nullptr, argnodes[Idx]->name+"_funcarg");
+        //AllocaInst *Alloca = CreateEntryBlockAlloca(F, argnodes[Idx]->name, argnodes[Idx]->llvm_type);
+        Builder.CreateStore(&Arg, Alloca);
+        argnodes[Idx]->var = Alloca;
+        argnodes[Idx]->isPointer = true;
+      }
+
+      Idx++;
+    }
+
+    Builder.SetInsertPoint(previousBB);
+
+
+    std::clog << "Gereee" << std::endl;
+
+
+
+
+
+
+
+
+    st.insertNode(functionNode,DECL_func);
+
+
+    st.createScope(Tid); //add the name in scope 
+
+
+
+    //adding arguments in the st
+    for(Node *node : argnodes){
+      st.insertNode(node,DECL_var);
+    }
+  
+    st.exitScope();
+
+    // std::clog << "Current Scope: " <<  st.currentScope()->name << std::endl;
+
+
+
+
 
       return nullptr;
+  }
+
+  Function *getFunction(){
+    return func;
   }
 
   std::vector<FuncArg *> getArgs(){
     return fpardef_list->getArgs();
   }
 
+  std::string getTid(){
+    return Tid;
+  }
+
   public:
     std::string Tid;
     FparDefList *fpardef_list;
     DataType type;
+
+    Node *fnode;
+
+    Function *func;
 
 };
 
@@ -1430,61 +1568,34 @@ class FunctionDef : public Stmt {
 
   Value* compile() override {
 
-
-    // Make the function type:  double(double,double) etc.
-
+    BasicBlock *previousBB = Builder.GetInsertBlock();
+    BasicBlock *BB;
     DataType dtype = header->getReturnType();
 
-
-    Type *type = getLlvmType(dtype);
-
+    std::string funcName = header->getTid(); //funcname is Tid ?
 
 
-    //args
+    Function *F;
 
-    std::vector<Node*> argnodes;
+    std::clog << "FunctionDef funcname: " << funcName << std::endl;
+    Node *node = st.lookupNode(funcName,DECL_func);
 
-    std::vector<FuncArg *> args = header->getArgs();
-    std::vector<Type*> argTypes = {};
-    for(FuncArg *arg : args){
-      //TODO: handle ref, pass as pointer
- 
-
-      Node *node = new Node();
-      node->name = arg->name;
-      node->decl_type = DECL_var;
-      node->type = arg->type;
-      std::clog << "New node! :" << arg->name << " is Array: " << arg->isArray   << std::endl;
-      node->llvm_type = getLlvmType(arg->type,arg->isArray);
-      node->assigned = true;//we do this since its arguments and the args are assigned
-      node->isPointer = arg->ref;
-
-
-
-      argnodes.push_back(node);
-      std::clog << "Arg node: " << node->name << "is ref: "<<arg->ref <<  "is array: " <<arg->isArray << std::endl;
-      if(arg->ref){
-        argTypes.push_back(PointerType::get(node->llvm_type, 0));
-      }else{
-        argTypes.push_back(node->llvm_type);
-      }
-
-
+    if(node == nullptr){
+      //if not declared
+      header->compile();
+      F = header->getFunction();
+      BB = header->fnode->block;
+    }
+    else{
+      //if declared
+      F = node->function;
+      BB = node->block;
     }
 
 
 
 
-
-
-    FunctionType *FT = FunctionType::get(type,argTypes,false);
-
-
-
-    Function *F = Function::Create(FT, Function::ExternalLinkage, header->Tid,TheModule.get());
-
-
-
+    
 
     std::clog << "First Function: " << firstFunction << std::endl;
     if(firstFunction){
@@ -1493,62 +1604,10 @@ class FunctionDef : public Stmt {
     }
 
 
-    BasicBlock *previousBB = Builder.GetInsertBlock();
-
-
-    BasicBlock *BB = BasicBlock::Create(TheContext, header->Tid, F);
+    st.enterScope(funcName);
+    //BasicBlock *BB = BasicBlock::Create(TheContext, funcName, F);
     Builder.SetInsertPoint(BB);
 
-
-    //get arguments
-    //TODO: double check the following!
-    unsigned Idx = 0;
-    for (auto &Arg : F->args()) {
-      Arg.setName(argnodes[Idx]->name+"_funcarg");
-
-      if(argnodes[Idx]->isPointer){
-        argnodes[Idx]->var = &Arg;
-      }
-      else{
-        //null ptr needs to be arraySize if exists!
-        llvm::AllocaInst* Alloca = Builder.CreateAlloca(argnodes[Idx]->llvm_type, nullptr, argnodes[Idx]->name+"_funcarg");
-        //AllocaInst *Alloca = CreateEntryBlockAlloca(F, argnodes[Idx]->name, argnodes[Idx]->llvm_type);
-        Builder.CreateStore(&Arg, Alloca);
-        argnodes[Idx]->var = Alloca;
-        argnodes[Idx]->isPointer = true;
-      }
-
-      Idx++;
-    }
-
-
-    std::clog << "Gereee" << std::endl;
-
-
-
-    Node *functionNode = new Node();
-    functionNode->name = header->Tid;
-    functionNode->decl_type = DECL_func;
-    functionNode->function = F;
-    functionNode->funcargs = header->getArgs();
-
-
-
-
-    st.insertNode(functionNode,DECL_func);
-
-
-    st.createScope(header->Tid); //add the name in scope 
-    
-
-
-    //adding arguments in the st
-    for(Node *node : argnodes){
-      st.insertNode(node,DECL_var);
-    }
-
-
-    std::clog << "Current Scope: " <<  st.currentScope()->name << std::endl;
 
     
 

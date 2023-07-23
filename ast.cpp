@@ -10,6 +10,7 @@ Function *AST::TheWriteInteger;
 Function *AST::TheWriteChar;
 Function *AST::TheWriteString;
 Function *AST::TheReadInteger;
+Function *AST::Thestrlen;
 
 
 Type *AST::i8;

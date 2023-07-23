@@ -53,6 +53,8 @@ struct Node{
 
     bool isArgument;
 
+    BasicBlock *block;
+
 
 
     bool assigned;
@@ -88,6 +90,7 @@ class SymbolTable{
     }
 
     void createScope(std::string scope_name){//types too?
+    
         ScopeEntry *new_scope = new ScopeEntry;
         new_scope->name = scope_name;
         new_scope->parent = current_scope;
@@ -95,6 +98,17 @@ class SymbolTable{
         current_scope = new_scope;
 
         scopes[scope_name] = new_scope;
+    }
+
+    void enterScope(std::string scope_name){
+        // check if scope_name not in scopes
+        if(scopes.find(scope_name) == scopes.end()){
+            std::clog << "Scope " << scope_name << " not found" << std::endl;
+            exit(2);         
+            return;
+        }
+        current_scope = scopes[scope_name];
+
     }
 
     void exitScope(){
