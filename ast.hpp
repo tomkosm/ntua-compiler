@@ -980,7 +980,7 @@ class If : public Stmt {
   bool isReturn() override{
 
     if(stmt2 == nullptr){
-      return stmt1->isReturn();
+      return false;
     }
     else{
       return stmt1->isReturn() && stmt2->isReturn();
