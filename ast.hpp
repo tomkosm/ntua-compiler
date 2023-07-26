@@ -143,6 +143,12 @@ class AST {
                        "strlen", TheModule.get());
 
 
+    FunctionType *strcpy_type =
+      FunctionType::get(Type::getVoidTy(TheContext), {PointerType::get(i8, 0),PointerType::get(i8, 0)}, false);
+
+    Thestrcpy =
+      Function::Create(strcpy_type, Function::ExternalLinkage,
+                       "strcpy", TheModule.get());
 
 
 
@@ -227,6 +233,7 @@ class AST {
 
   static Function *Thestrlen;
 
+  static Function *Thestrcpy;
 
 
   static Type *i8;
@@ -272,6 +279,8 @@ class Expr : public AST {
 
     Value* compile() override {
       std::clog << "Called base EXPR compile!" << std::endl;
+      return nullptr;
+
         // Implement compile for Expr if necessary, or keep it pure virtual
     }
 };
@@ -647,6 +656,8 @@ class IdLval : public Lvalue {
     
     Node* idNode = st.lookupNode(var);
     if(idNode == nullptr){
+      //
+      std::clog << st.currentScope()->name << std::endl;
       std::cerr << "Error: variable " << var << " not declared" << std::endl;
       exit(1);
     }
@@ -885,7 +896,14 @@ class Return : public Stmt {
   }
   Value *compile() override{
     std::clog << "Compiling return! " << std::endl;
-    return Builder.CreateRet(expr->compile());
+    Value * compiledExpr = expr->compile();
+
+    if (compiledExpr == nullptr){
+      return Builder.CreateRetVoid();
+    }else{
+      return Builder.CreateRet(compiledExpr);
+    }
+
   }
 
  private:
@@ -1587,6 +1605,7 @@ class FunctionDef : public Stmt {
       BB = header->fnode->block;
     }
     else{
+      std::clog << "Function: " << funcName << " already declared!" << std::endl;
       //if declared
       F = node->function;
       BB = node->block;
@@ -1604,7 +1623,9 @@ class FunctionDef : public Stmt {
     }
 
 
+    std::clog << "Entering scope: " << funcName << std::endl;
     st.enterScope(funcName);
+
     //BasicBlock *BB = BasicBlock::Create(TheContext, funcName, F);
     Builder.SetInsertPoint(BB);
 
@@ -1615,9 +1636,7 @@ class FunctionDef : public Stmt {
 
     stmt_list->compile();
 
-    //TODO: we should only do this if no return in stmt_list!
-    //maybe it works that way too cause worst case we have doulbe ret
-    if(dtype == TYPE_nothing)
+    if(dtype == TYPE_nothing && !stmt_list->isReturn())
       Builder.CreateRetVoid();
 
 
@@ -1626,7 +1645,6 @@ class FunctionDef : public Stmt {
 
 
     Builder.SetInsertPoint(previousBB);
-    // 
 
     
 
@@ -1939,6 +1957,12 @@ class FuncCall : public Stmt, public Expr {
           args = expr_list->compileAssignVector();
 
           func = Thestrlen;
+
+        }
+        else if(id == "strcpy"){
+          args = expr_list->compileAssignVector();
+
+          func = Thestrcpy;
 
         }
           else{
