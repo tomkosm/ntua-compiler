@@ -183,6 +183,8 @@ class AST {
         BB->eraseFromParent();
     }
 
+    std::clog << "Removed empty BBs!" << std::endl;
+
 
     // Print the names of all basic blocks
     // for (BasicBlock* BB : BasicBlocks) {
@@ -195,13 +197,16 @@ class AST {
     Builder.SetInsertPoint(BB);
     Builder.CreateRet(c32(0));
 
+    std::clog << "Created return!" << std::endl;
     // Verify the IR.
     bool bad = verifyModule(*TheModule, &errs());
+    std::clog << "Verified!1" << std::endl;
     if (bad) {
       std::cerr << "The IR is bad!" << std::endl;
       TheModule->print(errs(), nullptr);
       std::exit(1);
     }
+    std::clog << "Verified!" << std::endl;
 
     // Optimize!
     TheFPM->run(*main);
@@ -971,6 +976,18 @@ class If : public Stmt {
  public:
   If(Expr *c, Stmt *s1, Stmt *s2 = nullptr) : cond(c), stmt1(s1), stmt2(s2) {}
   ~If() { delete cond; delete stmt1; delete stmt2; }
+
+  bool isReturn() override{
+
+    if(stmt2 == nullptr){
+      return stmt1->isReturn();
+    }
+    else{
+      return stmt1->isReturn() && stmt2->isReturn();
+    }
+  }
+
+
   void printAST(std::ostream &out) const override {
     out << "If(" << *cond << ", " << *stmt1;
     if (stmt2 != nullptr) out << ", " << *stmt2;
@@ -1033,9 +1050,10 @@ class If : public Stmt {
       std::clog << "About to compile else stmts" << std::endl;
       stmt2->compile();
 
-      if(stmt2 != nullptr && !stmt2->isReturn()){
+      std::clog << "is return: "<< stmt2->isReturn() << std::endl;
+      if(!stmt2->isReturn()){
         Builder.CreateBr(AfterBB);
-        Builder.SetInsertPoint(AfterBB);
+        //Builder.SetInsertPoint(AfterBB);
 
       }
 
@@ -1073,6 +1091,12 @@ class While : public Stmt {
   void printAST(std::ostream &out) const override {
     out << "While(" << *cond << ", " << *stmt << ")";
   }
+
+  bool isReturn() override{
+
+    return stmt->isReturn();
+  }
+
 
   Value *compile() override{
     std::clog <<"while compile" << std::endl;
