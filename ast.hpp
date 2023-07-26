@@ -934,7 +934,16 @@ class StmtList : public Stmt {
   Value* compile() override {
     std::clog << "StmtList compile: " << std::endl;
 
-    for (Stmt *s : stmt_list) s->compile();
+    for (Stmt *s : stmt_list) {
+      if(s->isReturn()){
+        std::clog << "Found return in stmtlist" << std::endl;
+        s->compile();
+        return nullptr;
+      }else{
+        s->compile();
+      }
+      
+      };
 
     std::clog << "StmtList compile done" << std::endl;
 
@@ -1024,7 +1033,7 @@ class If : public Stmt {
       std::clog << "About to compile else stmts" << std::endl;
       stmt2->compile();
 
-      if(stmt2 != nullptr && !stmt1->isReturn()){
+      if(stmt2 != nullptr && !stmt2->isReturn()){
         Builder.CreateBr(AfterBB);
         Builder.SetInsertPoint(AfterBB);
 
