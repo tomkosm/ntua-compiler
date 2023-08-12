@@ -56,7 +56,7 @@ class AST {
     Type *itype;
 
     if(dtype == TYPE_int)
-        itype =  Type::getInt32Ty(TheContext);
+        itype =  Type::getInt64Ty(TheContext);
     else if(dtype == TYPE_char)
         itype = Type::getInt8Ty(TheContext);
     else if(dtype == TYPE_nothing)
@@ -155,7 +155,7 @@ class AST {
 
 
     // Define and start the main function.
-    FunctionType *main_type = FunctionType::get(i32, {}, false);
+    FunctionType *main_type = FunctionType::get(i64, {}, false);
     Function *main =
       Function::Create(main_type, Function::ExternalLinkage,
                        "main", TheModule.get());
@@ -195,7 +195,7 @@ class AST {
 
 
     Builder.SetInsertPoint(BB);
-    Builder.CreateRet(c32(0));
+    Builder.CreateRet(c64(0));
 
     std::clog << "Created return!" << std::endl;
     // Verify the IR.
@@ -251,7 +251,9 @@ class AST {
   static ConstantInt* c32(int n) {
     return ConstantInt::get(TheContext, APInt(32, n, true));
   }
-
+  static ConstantInt* c64(int n) {
+    return ConstantInt::get(TheContext, APInt(64, n, true));
+  }
 
 
 
@@ -454,8 +456,8 @@ class VarDec : public Stmt {
 
 
     if(dtype == TYPE_int){
-      itype = i32;
-      initializerSize = 32;
+      itype = i64;
+      initializerSize = 64;
     }
     else if(dtype == TYPE_char){
       itype = i8;
@@ -482,7 +484,7 @@ class VarDec : public Stmt {
       //wrong need to handle multi dim
       
       //Type *ltype = itype;
-      Initializer = c32(0);
+      Initializer = c64(0);
 
       std::vector<llvm::Constant*> arrayElems;
       for(auto size : arraysizes) {
@@ -701,7 +703,7 @@ class IdLval : public Lvalue {
   }
 
   std::vector<Value *> getIndexes() override{
-    std::vector<Value *> v = {c32(0)};
+    std::vector<Value *> v = {c64(0)};
     return v;
   }
 
@@ -1213,7 +1215,7 @@ class UnaryOp : public Expr {
     else if(var == "-"){
       // we do 0-value(expr1) to inverse
       Value *v = expr1->compile();
-      return Builder.CreateSub(Builder.getInt32(0), v, "invertedVal");
+      return Builder.CreateSub(Builder.getInt64(0), v, "invertedVal");
 
     }
 
@@ -1951,11 +1953,11 @@ class FuncCall : public Stmt, public Expr {
           args = expr_list->compileVector();
 
           //cast vector Value to 64 bit
-          std::vector<Value*> args64;
-          for(auto &a : args) {
-              args64.push_back(Builder.CreateSExt(a, i64, "cast"));
-          }
-          args = args64;
+          // std::vector<Value*> args64;
+          // for(auto &a : args) {
+          //     args64.push_back(Builder.CreateSExt(a, i64, "cast"));
+          // }
+          //args = args64;
 
           func = TheWriteInteger;
         }
@@ -2015,7 +2017,8 @@ class FuncCall : public Stmt, public Expr {
 
     if(id == "readInteger" || id == "strlen"){
       
-      return Builder.CreateTrunc(res, i32, "cast");
+      return Builder.CreateSExt(res, i64, "cast");
+      //return Builder.CreateTrunc(res, i32, "cast");
       // llvm::Value* truncatedValue = Builder.CreateTrunc(res, Builder.getInt32Ty());
       // return Builder.CreateZExt(truncatedValue, Builder.getInt64Ty());
 
@@ -2046,7 +2049,7 @@ class IntConst : public Expr {
     std::clog << "Compiling expression: " << num << std::endl;
     //return ConstantInt::get(TheContext, APInt(32, num));
     //return ConstantInt::get(i32, num);
-    return ConstantInt::get(i32, num);
+    return ConstantInt::get(i64, num);
 
   }
 

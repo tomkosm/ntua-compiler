@@ -11,6 +11,7 @@ Function *AST::TheWriteChar;
 Function *AST::TheWriteString;
 Function *AST::TheReadInteger;
 Function *AST::Thestrlen;
+Function *AST::Thestrcpy;
 
 
 Type *AST::i8;

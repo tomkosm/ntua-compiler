@@ -153,7 +153,7 @@ fpar-def_helper :
 
 fpar-def_list :
 /*nothing */ { $$ = new FparDefList(); }
-|  fpar-def fpar-def_helper { $2->add($1); $$ = $2; }
+|  fpar-def fpar-def_helper { $2->add_front($1); $$ = $2; }
 ;
 
 
@@ -304,7 +304,11 @@ void yyerror(const char *msg) {
   exit(42);
 }
 
-int main() {
+int main(int argc, char** argv) {
+
+    for(int i = 0; i < argc; i++) {
+        std::clog << "Argument" <<  i << " " <<  argv[i] << std::endl;
+    }
   extern int yydebug;
   yydebug = 0;
   // #ifdef YYDEBUG
