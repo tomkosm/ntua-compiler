@@ -268,6 +268,9 @@ class AST {
   static ConstantInt* c64(int n) {
     return ConstantInt::get(TheContext, APInt(64, n, true));
   }
+  void logError(char *msg){
+      yyerror(msg,line);
+  }
 
 
 
@@ -700,6 +703,17 @@ class IdLval : public Lvalue {
 
   void sem() override{
       //TODO: maybe check that its a valid one in st?
+      //we dont want this to run in vardec
+//      Node* idNode = st.lookupNode(var);
+//      if(idNode == nullptr){
+//          logError("Cant find id in sem");
+//          //
+//
+////          std::clog << st.currentScope()->name << std::endl;
+////          std::cerr << "Error: variable " << var << " not declared" << std::endl;
+////          exit(1);
+//      }
+
   }
 
   std::string getName() override {
@@ -1871,7 +1885,7 @@ class CompareOp : public Cond {
       std::clog << "Sem CompareOp" << std::endl;
       //should have .type
       if(expr1->sem_type != expr2->sem_type)
-          yyerror("Compare types dont match",line);
+          logError("Compare types dont match");
 
       sem_type = TYPE_bool;
 

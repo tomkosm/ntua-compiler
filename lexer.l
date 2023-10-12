@@ -25,6 +25,7 @@ SPECIAL \\(n|t|r|0|\\|\'|\"|x{HEX}{2})
 
 
 %option noyywrap
+%option yylineno
 
 %%
 
