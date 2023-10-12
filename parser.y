@@ -298,8 +298,14 @@ cond :
 
 %%
 
-
+extern int yylineno;
 void yyerror(const char *msg) {
+  //printf("Error on line %d: ", line);
+  printf("Syntax error: %s\n", msg);
+  exit(42);
+}
+void yyerror(const char *msg,int line) {
+  printf("Error on line %d: ", line);
   printf("Syntax error: %s\n", msg);
   exit(42);
 }
@@ -310,7 +316,7 @@ int main(int argc, char** argv) {
         std::clog << "Argument" <<  i << " " <<  argv[i] << std::endl;
     }
   extern int yydebug;
-  yydebug = 0;
+  //yydebug = 0;
   // #ifdef YYDEBUG
     // yydebug = 0; not working tiwh clang++ ? google
   // #endif

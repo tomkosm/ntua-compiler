@@ -27,13 +27,17 @@ using namespace llvm;
 
 
 
-extern std::vector<int> rt_stack;
+//extern std::vector<int> rt_stack;
 
+void yyerror(const char *s,int line);
+extern int yylineno;
 
 enum DataType 
 {   TYPE_int, 
     TYPE_char, 
-    TYPE_nothing
+    TYPE_nothing,
+    TYPE_charList, //hidden
+    TYPE_bool, //hidden
 };
 
 //needs to be able to see DataType
@@ -44,11 +48,15 @@ enum DataType
 
 class AST {
  public:
+
+  AST() : line(yylineno){}
   virtual ~AST() = default;
   virtual void printAST(std::ostream &out) const = 0;
   virtual Value* compile() const {std::clog << "Called ast const compile" <<std::endl; exit(2); return nullptr; }
   virtual Value* compile()  { std::clog << "Called ast compile" <<std::endl; exit(2); return nullptr; }
   virtual Node *compileArray() {std::clog << "Called ast compilearray" <<std::endl; exit(2);}
+  virtual void sem() {std::clog << "Called default sem!" << std::endl; exit(2);}
+
   std::string getName(){}
 
   Type* getLlvmType(DataType dtype,bool isArray=false){
@@ -153,6 +161,10 @@ class AST {
 
 
 
+    //do sem analysis
+    sem();
+
+
 
     // Define and start the main function.
     FunctionType *main_type = FunctionType::get(i64, {}, false);
@@ -221,6 +233,8 @@ class AST {
 
 
  protected:
+  int line;
+
   static LLVMContext TheContext;
   static IRBuilder<> Builder;
   static std::unique_ptr<Module> TheModule;
@@ -262,9 +276,10 @@ class AST {
 
 inline std::ostream &operator<<(std::ostream &out, DataType t) {
   switch (t) {
-    case TYPE_int:  out << "int";  break;
-    case TYPE_char: out << "char"; break;
-    case TYPE_nothing: out << "nothing"; break;
+    case TYPE_int:  out << "TYPE_int";  break;
+    case TYPE_char: out << "TYPE_char"; break;
+    case TYPE_nothing: out << "TYPE_nothing"; break;
+    case TYPE_bool : out << "TYPE_bool"; break;
 
   }
   return out;
@@ -278,18 +293,27 @@ inline std::ostream &operator<<(std::ostream &out, const AST &ast) {
 
 class Expr : public AST {
  public:
-  virtual Value* compileAssign() { std::clog << "Called Lvalue compileAssign!" << std::endl; return nullptr; }
-  virtual std::vector<int> getArraySize() { std::clog << "Called default Lvalue getArraySize!" << std::endl; exit(2);}
- void printAST(std::ostream &out) const override {
+
+    DataType sem_type;
+    virtual Value* compileAssign() { std::clog << "Called Lvalue compileAssign!" << std::endl; return nullptr; }
+    virtual std::vector<int> getArraySize() { std::clog << "Called default Lvalue getArraySize!" << std::endl; exit(2);}
+    void check_type(DataType t){
+      sem();
+      std::clog << "Check_TYPE " << sem_type << " " << t << std::endl;
+      printAST(std::clog);
+      std::clog << std::endl;
+      if(sem_type != t) yyerror("Type mismatch",line);
+    }
+    void printAST(std::ostream &out) const override {
     out << "Expr(empty)";
-  }
+    }
 
     Value* compile() override {
       std::clog << "Called base EXPR compile!" << std::endl;
       return nullptr;
-
         // Implement compile for Expr if necessary, or keep it pure virtual
     }
+
 };
 
 
@@ -299,6 +323,9 @@ class Id : public Expr {
   Id(std::string *c): var(*c) {}
   void printAST(std::ostream &out) const override {
     out << "Id(" << var << ")";
+  }
+  void sem() override{
+      //TODO: to implement this we need to lookup in st
   }
 
   std::string getName() const { return var; }
@@ -318,6 +345,9 @@ class IdList : public AST {
   }
   void add(Id *d) { id_list.push_front(d); }
 
+  void sem() override{
+      for (Id *d : id_list) d->sem();
+  }
   void printAST(std::ostream &out) const override {
     out << "IdList(";
     bool first = true;
@@ -334,7 +364,7 @@ class IdList : public AST {
   std::vector<Id *> getIds() const { 
 
     return std::vector<Id*>(id_list.begin(), id_list.end()); 
-    }
+  }
 
 
     std::vector<Value*> compileVector() {
@@ -388,6 +418,10 @@ class ArraySize : public Stmt {
 
   void add(int s) { array_list.push_back(s); }
 
+  void sem() override {
+    //TODO: figure out what testing we need
+  }
+
   void printAST(std::ostream &out) const override {
     out << "ArraySize(";
     bool first = true;
@@ -413,6 +447,10 @@ class ArraySize : public Stmt {
 class TypeDef : public Stmt {
  public:
   TypeDef(DataType t, ArraySize *s): type(t), array_size(s) {}
+
+  void sem() override{
+      //TODO:fill
+  }
 
   void printAST(std::ostream &out) const override {
     out << "TypeDef(" << type << ", " << *array_size << ")";
@@ -440,6 +478,10 @@ class VarDec : public Stmt {
 
   void printAST(std::ostream &out) const override {
     out << "VarDec(" << *id_list << ": " << *type << ")";
+  }
+
+  void sem() override{
+      //TODO: implement? not sure what to do here
   }
 
   std::vector<Id *> getIds() const { return id_list->getIds(); }
@@ -565,6 +607,9 @@ class CharConst : public Expr {
   void printAST(std::ostream &out) const override {
     out << "CharConst(" << var << ")";
   }
+  void sem() override{
+    sem_type = TYPE_char;
+  }
 
   Value *compile() override {
     std::clog << "Called CharConst compile!" << std::endl;
@@ -583,7 +628,9 @@ class CharConstSpecial : public CharConst {
   void printAST(std::ostream &out) const override {
     out << "CharConstSpecial(" << escSeqToChar(var) << ")";
   }
-
+  void sem() override{
+    sem_type = TYPE_char;
+  }
   int escSeqToChar(std::string v) const
 {
   
@@ -615,8 +662,8 @@ class CharConstSpecial : public CharConst {
         }
     
 
-    return res;
-}
+        return res;
+    }
 }
   Value *compile() override {
     std::clog << "Called CharConstSpecial compile!" << std::endl;
@@ -625,9 +672,9 @@ class CharConstSpecial : public CharConst {
 
 
 
- private:
+private:
   std::string var;
-  };
+};
 
 
 
@@ -649,6 +696,10 @@ class IdLval : public Lvalue {
   IdLval(std::string *c) : var(*c) {}
   void printAST(std::ostream &out) const override {
     out << "IdLval(" << var << ")";
+  }
+
+  void sem() override{
+      //TODO: maybe check that its a valid one in st?
   }
 
   std::string getName() override {
@@ -681,7 +732,7 @@ class IdLval : public Lvalue {
   }
 
   Value *compile() {
-    std::clog << "Compiling IdLval!!!!!!!!!" << std::endl;
+    std::clog << "Compiling IdLval" << std::endl;
 
 
     Value *gvar = compileAssign();
@@ -744,11 +795,15 @@ class IdLval : public Lvalue {
 
 
 class ArrayElem : public Lvalue {
- public: /*need to support arrays too!*/
+ public:
   ArrayElem(Lvalue *lhs, Expr *rhs): var(lhs), expr(rhs) {}
   ~ArrayElem() { delete var; delete expr; }
   void printAST(std::ostream &out) const override {
     out << "ArrayElem(" << *var << ", " << *expr << ")";
+  }
+
+  void sem() override{
+      //TODO: implement?
   }
 
   std::string getName() override {
@@ -844,11 +899,17 @@ class ArrayElem : public Lvalue {
 
 
 class Assign : public Stmt {
- public: /*need to support arrays too!*/
+ public:
   Assign(Lvalue *lhs, Expr *rhs): var(lhs), expr(rhs) {}
   ~Assign() { delete var; delete expr; }
   void printAST(std::ostream &out) const override {
     out << "Assign(" << *var << ", " << *expr << ")";
+  }
+
+  void sem() override{
+      var->sem();
+
+      expr->sem();
   }
   
   Value* compile() override {
@@ -898,6 +959,11 @@ class Return : public Stmt {
   void printAST(std::ostream &out) const override {
     out << "Return(" << *expr << ")";
   }
+
+  void sem() override{
+
+  }
+
   bool isReturn() override{
     return true;
   }
@@ -927,6 +993,10 @@ class StmtList : public Stmt {
 
   void name(){std::clog << "StmtList name" << std::endl;}
   //TODO: We need to check that the order of statements is correct! SUPER IMPORTANT!
+
+  void sem() override{
+      for (Stmt *s : stmt_list) s->sem();
+  }
 
   bool isReturn() override{
     for (Stmt *s : stmt_list){
@@ -994,6 +1064,14 @@ class If : public Stmt {
     out << "If(" << *cond << ", " << *stmt1;
     if (stmt2 != nullptr) out << ", " << *stmt2;
     out << ")";
+  }
+
+  void sem() override{
+      std::clog << "Checking if type: " << std::endl;
+      cond->check_type(TYPE_bool);
+
+      stmt1->sem();
+      if(stmt2 != nullptr) stmt2->sem();
   }
 
   Value* compile()  override {
@@ -1094,6 +1172,13 @@ class While : public Stmt {
     out << "While(" << *cond << ", " << *stmt << ")";
   }
 
+  void sem() override{
+    cond->check_type(TYPE_bool);
+
+    stmt->sem();
+
+  }
+
   bool isReturn() override{
 
     return stmt->isReturn();
@@ -1156,12 +1241,20 @@ class While : public Stmt {
 };
 
 class BinOp : public Expr {
-    //also take care of conds 
+
  public:
   BinOp(Expr *e1, std::string *s, Expr *e2) : expr1(e1), op(*s), expr2(e2) {}
   ~BinOp() { delete expr1; delete expr2; }
   void printAST(std::ostream &out) const override {
     out << "BinOp(" << *expr1 << ", " << op << ", " << *expr2 << ")";
+  }
+
+  void sem() override{
+      //we need both to be int
+      expr1->check_type(TYPE_int);
+      expr2->check_type(TYPE_int);
+
+      sem_type = TYPE_int;
   }
 
   Value* compile() override{
@@ -1204,12 +1297,16 @@ class UnaryOp : public Expr {
   ~UnaryOp() { delete expr1; }
   void printAST(std::ostream &out) const override {
     out << "UnaryOp("<< var<< ", " << *expr1 << ")";
-
   }
+
+  void sem() override{
+      expr1->check_type(TYPE_int);
+      sem_type = TYPE_int;
+  }
+
   Value *compile() override{
 
     if(var == "+"){
-      //i dont think we need to do anything here
       return expr1->compile();
     }
     else if(var == "-"){
@@ -1414,6 +1511,12 @@ class FunctionHeader : public Stmt {
     return type;
   }
 
+  void sem() override{
+    //todo: set here st etc.. and checks?
+
+
+  }
+
   Value* compile() override{
       std::clog << "FunctionHeader compile: " << std::endl;
       //fpardef_list->compileVector();
@@ -1425,7 +1528,6 @@ class FunctionHeader : public Stmt {
 
 
     Type *type = getLlvmType(dtype);
-
 
 
     //args
@@ -1459,10 +1561,6 @@ class FunctionHeader : public Stmt {
 
 
     }
-
-
-
-
 
 
     FunctionType *FT = FunctionType::get(type,argTypes,false);
@@ -1581,6 +1679,9 @@ class LocalDefList : public Stmt {
   }
   void add(Stmt *d) { localdef_list.push_back(d); }
 
+  void sem() override{
+      for (Stmt *d : localdef_list) d->sem();
+  }
   void printAST(std::ostream &out) const override {
     out << "LocalDefList(";
     bool first = true;
@@ -1619,6 +1720,10 @@ class FunctionDef : public Stmt {
     delete localdef_list; delete stmt_list; delete header;
   }
 
+  void sem() override{
+      stmt_list->sem();
+  }
+
   Value* compile() override {
 
     BasicBlock *previousBB = Builder.GetInsertBlock();
@@ -1646,9 +1751,6 @@ class FunctionDef : public Stmt {
       BB = node->block;
     }
 
-
-
-
     
 
     std::clog << "First Function: " << firstFunction << std::endl;
@@ -1657,14 +1759,11 @@ class FunctionDef : public Stmt {
       firstFunction = false;
     }
 
-
     std::clog << "Entering scope: " << funcName << std::endl;
     st.enterScope(funcName);
 
     //BasicBlock *BB = BasicBlock::Create(TheContext, funcName, F);
     Builder.SetInsertPoint(BB);
-
-
     
 
     localdef_list->compile();
@@ -1677,20 +1776,12 @@ class FunctionDef : public Stmt {
 
 
 
-
-
     Builder.SetInsertPoint(previousBB);
-
-    
 
 
     std::clog << "Exiting scope: " << st.currentScope()->name << std::endl;
 
     st.exitScope(); //remove the name from scope
-
-
- 
-
 
 
     return nullptr;
@@ -1733,8 +1824,17 @@ class BinOpCond : public Cond {
   ~BinOpCond() { delete expr1; delete expr2; }
   void printAST(std::ostream &out) const override {
     out << "BinOpCond("<< op<< ", " << *expr1 << ", " << *expr2 << ")";
-
   }
+
+  void sem() override{
+      //TODO: check maybe if its cond? or change type?
+      std::clog << "Checking BinOpCond" << std::endl;
+      expr1->check_type(TYPE_bool);
+      expr2->check_type(TYPE_bool);
+
+      sem_type = TYPE_bool;
+  }
+
   Value *compile() override{
 
     Value *val1 = expr1->compile();
@@ -1763,12 +1863,26 @@ class CompareOp : public Cond {
     out << "CompareOp("<< op<< ", " << *expr1 << ", " << *expr2 << ")";
   }
 
+  void sem() override{
+      //TODO: also check if array?
+
+      expr1->sem();
+      expr2->sem();
+      std::clog << "Sem CompareOp" << std::endl;
+      //should have .type
+      if(expr1->sem_type != expr2->sem_type)
+          yyerror("Compare types dont match",line);
+
+      sem_type = TYPE_bool;
+
+  }
+
   Value *compile() override{
 
     Value *val1 = expr1->compile();
     Value *val2 = expr2->compile();
 
-    //TODO: support arrays
+    //TODO: support arrays ??
     if(op == "<"){
       return Builder.CreateICmpSLT(val1, val2, "cmplt");
     }
@@ -1812,6 +1926,12 @@ class UnaryOpCond : public Cond {
     out << "UnaryOpCond("<< op<< ", " << *expr1 << ")";
   }
 
+  void sem() override{
+      expr1->check_type(TYPE_bool);
+      sem_type = TYPE_bool;
+
+
+  }
   Value *compile() override{
 
     Value *val1 = expr1->compile();
@@ -1843,6 +1963,11 @@ class ExprList : public Expr {
   }
   void add(Expr *d) { expr_list.push_back(d); }
   void add_front(Expr *d) { expr_list.push_front(d); }
+
+  void sem() override{
+      for (const auto &d : expr_list )
+          d->sem();
+  }
 
   void printAST(std::ostream &out) const override {
     out << "ExprList(";
@@ -1893,6 +2018,12 @@ class FuncCall : public Stmt, public Expr {
   }
   void printAST(std::ostream &out) const override {
     out << "FuncCall(" << id << ", " << *expr_list << ")";
+  }
+
+  void sem() override{
+      //TODO: implement this, we need to check that the arguments of the function have the correct types
+      //also add return type to type
+      sem_type = TYPE_int;
   }
   Value* compile() override{
     std::clog << "Compiling function call: " << id << std::endl;
@@ -2044,6 +2175,10 @@ class IntConst : public Expr {
     out << "IntConst(" << num << ")";
   }
 
+  void sem() override{
+      sem_type = TYPE_int;
+  }
+
   Value *compile() override {
 
     std::clog << "Compiling expression: " << num << std::endl;
@@ -2068,7 +2203,9 @@ class StringConst : public Lvalue {
   void printAST(std::ostream &out) const override {
     out << "StringConst(" << var << ")";
   }
-
+  void sem() override{
+      sem_type = TYPE_charList;
+  }
 
   //TODO: make it work for the rest of the special chars  
   std::string processString(const std::string& input) {
