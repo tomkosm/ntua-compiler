@@ -42,6 +42,9 @@ struct Node{
     DeclType decl_type;
     std::string name;
 
+    //for vardec
+    std::vector<int> arraysizes;
+
     Value *var;
     Function *function;
     llvm::Type *llvm_type;

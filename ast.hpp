@@ -317,17 +317,23 @@ class Expr : public AST {
 };
 
 
-
+//only used for definitions!
 class Id : public Expr {
  public:
   Id(std::string *c): var(*c) {}
   void printAST(std::ostream &out) const override {
     out << "Id(" << var << ")";
   }
-  void sem() override{
-      //TODO: to implement this we need to lookup in st
-  }
+  //this class just gives name to VarDec
+//  void sem() override{
+      //This is implemented higher up, this is never called!
+      //TODO: to implement this we need to add in st!
 
+//      Node *node = new Node;
+//
+//
+//      st.insertNode();
+//  }
   std::string getName() const { return var; }
 
 
@@ -481,7 +487,24 @@ class VarDec : public Stmt {
   }
 
   void sem() override{
-      //TODO: implement? not sure what to do here
+      //create the st entry
+
+      if(st.lookupNode(id->getName(),DECL_var) !== nullptr){
+          logErr
+      }
+
+      //check that there isnt another node with same name,type
+      Node *idNode = new Node();
+      idNode->name = id->getName();
+      idNode->type = type->getType();
+      idNode->decl_type = DECL_var;
+      idNode->array_size = type->getSizes();
+//      idNode->var = gVar;
+//      idNode->llvm_type = itype;
+      idNode->assigned = false;
+      idNode->isPointer = true;
+
+      st.insertNode(idNode);
   }
 
   std::vector<Id *> getIds() const { return id_list->getIds(); }
