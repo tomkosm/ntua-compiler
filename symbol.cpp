@@ -93,7 +93,7 @@ class SymbolTable{
     }
 
     void createScope(std::string scope_name){//types too?
-    
+        //create and enters
         ScopeEntry *new_scope = new ScopeEntry;
         new_scope->name = scope_name;
         new_scope->parent = current_scope;

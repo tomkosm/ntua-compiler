@@ -3,7 +3,7 @@
 LLVMCONFIG=llvm-config
 
 CXX=clang++
-CXXFLAGS=-Wall -g `$(LLVMCONFIG) --cxxflags`
+CXXFLAGS=-Wall -g `$(LLVMCONFIG) --cxxflags` -std=c++17
 LDFLAGS=`$(LLVMCONFIG) --ldflags --system-libs --libs all`
 
 default: gracec

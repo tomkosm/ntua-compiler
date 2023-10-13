@@ -40,6 +40,9 @@ enum DataType
     TYPE_bool, //hidden
 };
 
+
+
+
 //needs to be able to see DataType
 #include "symbol.cpp"
 
@@ -164,6 +167,8 @@ class AST {
     //do sem analysis
     sem();
 
+    std::clog << "Sem analysis is now complete!" << std::endl;
+
 
 
     // Define and start the main function.
@@ -268,7 +273,15 @@ class AST {
   static ConstantInt* c64(int n) {
     return ConstantInt::get(TheContext, APInt(64, n, true));
   }
+  void logError(std::string msg){
+      yyerror(msg.c_str(),line);
+  }
 
+  //not sure if we can put that somewhere else?
+    std::map<std::string, int> LIBRARY_FUNCTIONS = {
+            {"writeInteger", 1},
+            {"writeString", 1}
+    };
 
 
 };
@@ -291,7 +304,7 @@ inline std::ostream &operator<<(std::ostream &out, const AST &ast) {
 }
 
 
-class Expr : public AST {
+class Expr : virtual public AST {
  public:
 
     DataType sem_type;
@@ -300,10 +313,12 @@ class Expr : public AST {
     void check_type(DataType t){
       sem();
       std::clog << "Check_TYPE " << sem_type << " " << t << std::endl;
-      printAST(std::clog);
-      std::clog << std::endl;
-      if(sem_type != t) yyerror("Type mismatch",line);
+//      printAST(std::clog);
+//      std::clog << std::endl;
+      if(sem_type != t) logError("Type mismatch");
     }
+
+
     void printAST(std::ostream &out) const override {
     out << "Expr(empty)";
     }
@@ -399,7 +414,7 @@ class IdList : public AST {
 
 
 
-class Stmt : public AST {
+class Stmt : virtual public AST {
  public:
   void name(){std::clog << "Stmt name" << std::endl;}
 
@@ -486,25 +501,29 @@ class VarDec : public Stmt {
     out << "VarDec(" << *id_list << ": " << *type << ")";
   }
 
-  void sem() override{
+  void sem() override {
       //create the st entry
 
-      if(st.lookupNode(id->getName(),DECL_var) !== nullptr){
-          logErr
-      }
+      for (auto id: id_list->getIds()) {
 
-      //check that there isnt another node with same name,type
-      Node *idNode = new Node();
-      idNode->name = id->getName();
-      idNode->type = type->getType();
-      idNode->decl_type = DECL_var;
-      idNode->array_size = type->getSizes();
+
+          if (st.lookupNode(id->getName(), DECL_var) != nullptr) {
+              logError("Variable is already declared");
+          }
+
+          //check that there isnt another node with same name,type
+          Node *idNode = new Node();
+          idNode->name = id->getName();
+          idNode->type = type->getType();
+          idNode->decl_type = DECL_var;
+          idNode->array_size = type->getSizes();
 //      idNode->var = gVar;
 //      idNode->llvm_type = itype;
-      idNode->assigned = false;
-      idNode->isPointer = true;
+          idNode->assigned = false;
+          idNode->isPointer = true;
 
-      st.insertNode(idNode);
+          st.insertNode(idNode);
+      }
   }
 
   std::vector<Id *> getIds() const { return id_list->getIds(); }
@@ -723,6 +742,20 @@ class IdLval : public Lvalue {
 
   void sem() override{
       //TODO: maybe check that its a valid one in st?
+      //we dont want this to run in vardec
+      Node* idNode = st.lookupNode(var);
+      if(idNode == nullptr){
+          logError("Cant find id in sem");
+      else
+        sem_type = idNode->type;
+
+          //
+
+//          std::clog << st.currentScope()->name << std::endl;
+//          std::cerr << "Error: variable " << var << " not declared" << std::endl;
+//          exit(1);
+      }
+
   }
 
   std::string getName() override {
@@ -826,7 +859,7 @@ class ArrayElem : public Lvalue {
   }
 
   void sem() override{
-      //TODO: implement?
+      //TODO: implement???
   }
 
   std::string getName() override {
@@ -931,8 +964,8 @@ class Assign : public Stmt {
 
   void sem() override{
       var->sem();
-
       expr->sem();
+      if(var->sem_type != expr->sem_type) logError("Type mismatch...");
   }
   
   Value* compile() override {
@@ -983,9 +1016,6 @@ class Return : public Stmt {
     out << "Return(" << *expr << ")";
   }
 
-  void sem() override{
-
-  }
 
   bool isReturn() override{
     return true;
@@ -1535,7 +1565,60 @@ class FunctionHeader : public Stmt {
   }
 
   void sem() override{
-    //todo: set here st etc.. and checks?
+
+
+      std::vector<Node*> argnodes;
+
+      std::vector<FuncArg *> args = getArgs();
+      std::vector<Type*> argTypes = {};
+      for(FuncArg *arg : args){
+          //TODO: handle ref, pass as pointer
+
+
+          Node *node = new Node();
+          node->name = arg->name;
+          node->decl_type = DECL_var;
+          node->type = arg->type;
+          std::clog << "New node! :" << arg->name << " is Array: " << arg->isArray   << std::endl;
+          node->llvm_type = getLlvmType(arg->type,arg->isArray);
+          node->assigned = true;//we do this since its arguments and the args are assigned
+          node->isPointer = arg->ref;
+
+
+
+          argnodes.push_back(node);
+          std::clog << "Arg node: " << node->name << "is ref: "<<arg->ref <<  "is array: " <<arg->isArray << std::endl;
+          if(arg->ref){
+              argTypes.push_back(PointerType::get(node->llvm_type, 0));
+          }else{
+              argTypes.push_back(node->llvm_type);
+          }
+
+
+      }
+
+
+      Node *functionNode = new Node();
+      functionNode->name = Tid;
+      functionNode->decl_type = DECL_func;
+      //functionNode->function = F;
+      //functionNode->funcargs = getArgs(); we do this on compile
+      //functionNode->block = BB;
+
+      st.insertNode(functionNode,DECL_func);
+
+
+
+      st.createScope(Tid); //add the name in scope
+
+
+
+      //adding arguments in the st
+      for(Node *node : argnodes){
+          st.insertNode(node,DECL_var);
+      }
+
+      st.exitScope();
 
 
   }
@@ -1736,7 +1819,7 @@ class LocalDefList : public Stmt {
 
 class FunctionDef : public Stmt {
  public:
-  bool firstFunction;
+  bool firstFunction;//we set this to true on lexer for the main function
 
   FunctionDef(FunctionHeader *h,LocalDefList *l,StmtList *s) : header(h),localdef_list(l),stmt_list(s),firstFunction(false) {}
   ~FunctionDef() {
@@ -1744,7 +1827,31 @@ class FunctionDef : public Stmt {
   }
 
   void sem() override{
+
+
+      std::string funcName = header->getTid(); //funcname is Tid ?
+
+      //its possible that only header has been declared before
+      Node *node = st.lookupNode(funcName,DECL_func);//TODO: maybe do polymorphism?
+      if(node == nullptr){
+          header->sem();
+//          F = header->getFunction();
+//          BB = header->fnode->block;
+      }
+//      else{
+////          std::clog << "Function: " << funcName << " already declared!" << std::endl;
+////          //if declared
+////          F = node->function;
+////          BB = node->block;
+//      }
+
+      st.enterScope(funcName);
+
+      localdef_list->sem();
       stmt_list->sem();
+
+      st.exitScope(); //remove the name from scope
+
   }
 
   Value* compile() override {
@@ -1894,7 +2001,7 @@ class CompareOp : public Cond {
       std::clog << "Sem CompareOp" << std::endl;
       //should have .type
       if(expr1->sem_type != expr2->sem_type)
-          yyerror("Compare types dont match",line);
+          logError("Compare types dont match");
 
       sem_type = TYPE_bool;
 
@@ -2046,6 +2153,12 @@ class FuncCall : public Stmt, public Expr {
   void sem() override{
       //TODO: implement this, we need to check that the arguments of the function have the correct types
       //also add return type to type
+      Node* functionNode = st.lookupNode(id, DECL_func);
+
+
+      if(functionNode == nullptr && LIBRARY_FUNCTIONS.find(id) == LIBRARY_FUNCTIONS.end())// if the function is not in Symbol Table or LIBRARY
+            logError("Function named: " + id + " hasnt been declared");
+
       sem_type = TYPE_int;
   }
   Value* compile() override{
