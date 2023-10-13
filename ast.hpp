@@ -744,7 +744,7 @@ class IdLval : public Lvalue {
       //TODO: maybe check that its a valid one in st?
       //we dont want this to run in vardec
       Node* idNode = st.lookupNode(var);
-      if(idNode == nullptr){
+      if(idNode == nullptr)
           logError("Cant find id in sem");
       else
         sem_type = idNode->type;
@@ -754,7 +754,7 @@ class IdLval : public Lvalue {
 //          std::clog << st.currentScope()->name << std::endl;
 //          std::cerr << "Error: variable " << var << " not declared" << std::endl;
 //          exit(1);
-      }
+
 
   }
 
