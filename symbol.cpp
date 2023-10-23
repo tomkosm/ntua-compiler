@@ -52,6 +52,8 @@ struct Node{
     //for func
     std::vector<FuncArg *> funcargs;
     std::vector<int> array_size;
+
+    bool isCompiled; //atm used for function
     bool isPointer;
 
     bool isArgument;

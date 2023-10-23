@@ -63,7 +63,7 @@ class AST {
   std::string getName(){}
 
   Type* getLlvmType(DataType dtype,bool isArray=false){
-    std::clog << "hey" << std::endl;
+
     Type *itype;
 
     if(dtype == TYPE_int)
@@ -84,10 +84,6 @@ class AST {
     }
 
     return itype;
-
-
-
-      
   }
 
 
@@ -332,7 +328,7 @@ class Expr : virtual public AST {
 };
 
 
-//only used for definitions!
+//only used for definitions! VARDEC?
 class Id : public Expr {
  public:
   Id(std::string *c): var(*c) {}
@@ -388,7 +384,7 @@ class IdList : public AST {
   }
 
 
-    std::vector<Value*> compileVector() {
+  std::vector<Value*> compileVector() {
     std::vector<Value*> args;
 
     std::clog << "id_list compile: " << std::endl;
@@ -517,8 +513,10 @@ class VarDec : public Stmt {
           idNode->type = type->getType();
           idNode->decl_type = DECL_var;
           idNode->array_size = type->getSizes();
-//      idNode->var = gVar;
-//      idNode->llvm_type = itype;
+
+    //      idNode->var = gVar;
+    //
+            idNode->llvm_type = getLlvmType(idNode->type,idNode->array_size.size() != 0);
           idNode->assigned = false;
           idNode->isPointer = true;
 
@@ -535,29 +533,20 @@ class VarDec : public Stmt {
     Type * itype;
     int initializerSize;
 
-    DataType dtype = type->getType();
-
-
-
-    if(dtype == TYPE_int){
-      itype = i64;
-      initializerSize = 64;
-    }
-    else if(dtype == TYPE_char){
-      itype = i8;
-      initializerSize = 8;
-    }
 
 
     std::vector<int> arraysizes = type->getSizes();
+
     Constant* Initializer;
     ArrayType* ArrayTy;
     std::clog << "Array size: " << arraysizes.size() << std::endl;
     if(arraysizes.size() == 0){
       //Initializer = 0;
-      Initializer = ConstantInt::get(TheContext, llvm::APInt(initializerSize, 0));
-
+//      Initializer = ConstantInt::get(TheContext, llvm::APInt(initializerSize, 0));
+        Initializer = ConstantInt::get(getLlvmType(type->getType(),false), 0);
     }else if(arraysizes.size() >= 1){
+        //do this in getLLvmType TODO:
+
       //we reverse it so we get last first
 
       std::reverse(arraysizes.begin(), arraysizes.end());
@@ -591,6 +580,7 @@ class VarDec : public Stmt {
       // itype = ArrayTy;
     }
 
+    //start here
 
     //TODO: issues if multiple same name etc 
     for(auto id : id_list->getIds()) {
@@ -598,10 +588,11 @@ class VarDec : public Stmt {
 
       // AllocaInst* allocaInst = Builder.CreateAlloca(i32, 0, id->getName());
 
+      Node* node = st.lookupNode(id->getName(),DECL_var);
 
       GlobalVariable *gVar = new llvm::GlobalVariable(
         *TheModule,
-        itype,
+        node->llvm_type,
         false, // isConstant
         GlobalValue::ExternalLinkage,
         Initializer, // Initializer
@@ -613,19 +604,20 @@ class VarDec : public Stmt {
       std::clog << "Alloc " << id->getName() << std::endl;
 
 
-      Node *idNode = new Node();
-      idNode->name = id->getName();
-      idNode->type = type->getType();
-      idNode->decl_type = DECL_var;
-      idNode->var = gVar;
-      idNode->llvm_type = itype;
-      idNode->assigned = false;
-      idNode->isPointer = true;
-
-      std::clog << "Created node" << std::endl;
-      st.insertNode(idNode);
-
-      std::clog << "Inserted node" << std::endl;
+      node->var = gVar;
+//      Node *idNode = new Node();
+//      idNode->name = id->getName();
+//      idNode->type = type->getType();
+//      idNode->decl_type = DECL_var;
+//      idNode->var = gVar;
+//      idNode->llvm_type = itype;
+//      idNode->assigned = false;
+//      idNode->isPointer = true;
+//
+//      std::clog << "Created node" << std::endl;
+//      st.insertNode(idNode);
+//
+//      std::clog << "Inserted node" << std::endl;
 
     }
 
@@ -655,7 +647,8 @@ class CharConst : public Expr {
 
   Value *compile() override {
     std::clog << "Called CharConst compile!" << std::endl;
-    return ConstantInt::get(i8, var);
+    return c8(var);
+//    return ConstantInt::get(i8, var);
   }
 
 
@@ -709,7 +702,9 @@ class CharConstSpecial : public CharConst {
 }
   Value *compile() override {
     std::clog << "Called CharConstSpecial compile!" << std::endl;
-    return ConstantInt::get(i8, escSeqToChar(var));
+
+    return c8(escSeqToChar(var));
+    //    return ConstantInt::get(i8, escSeqToChar(var));
   }
 
 
@@ -733,6 +728,7 @@ class Lvalue : public Expr {
 //   virtual void execute() const = 0;
 };
 
+// IdLval for array is ArrayElem
 class IdLval : public Lvalue {
  public:
   IdLval(std::string *c) : var(*c) {}
@@ -741,14 +737,20 @@ class IdLval : public Lvalue {
   }
 
   void sem() override{
-      //TODO: maybe check that its a valid one in st?
-      //we dont want this to run in vardec
+      //TODO: check offset too?
+
+      // we dont want this to run in vardec
       Node* idNode = st.lookupNode(var);
       if(idNode == nullptr)
           logError("Cant find id in sem");
-      else
+      //TODO: we should do the below test only on access, check where getName is called?
+//     else if(!idNode->assigned)
+//         //TODO: make this work for ref too?
+//         logError("Error, tried to access a variable that isnt assigned");
+     else
         sem_type = idNode->type;
-
+     node = idNode;
+        //TODO: does this work for pointer? do we need new types?
           //
 
 //          std::clog << st.currentScope()->name << std::endl;
@@ -763,9 +765,11 @@ class IdLval : public Lvalue {
   }
 
   void updatelookup(){
+      std::clog << "Update lookup" << std::endl;
       node->assigned = true;
   }
 
+  //double check if we can do this better
   Value* compileAssign() override{
     
     Node* idNode = st.lookupNode(var);
@@ -795,10 +799,10 @@ class IdLval : public Lvalue {
 
 
     //TODO: figure out if we need this and also make it work for refs too
-    if(!node->assigned){
-      std::clog << "Error, tried to access a variable that isnt assigned" << std::endl;
-      //exit(2);
-    }
+//    if(!node->assigned){
+//      std::clog << "Error, tried to access a variable that isnt assigned" << std::endl;
+//      //exit(2);
+//    }
 
     if(!node->isPointer){
       return gvar;
@@ -814,6 +818,7 @@ class IdLval : public Lvalue {
     return v;
   }
 
+  //get array maybe is better name?
   Node *compileArray() override{
 
     Node* idNode = st.lookupNode(var);
@@ -822,11 +827,7 @@ class IdLval : public Lvalue {
       exit(1);
     }
 
-    
     return idNode;
-
-
-
   }
 
   std::vector<int> getArraySize() override{
@@ -845,7 +846,6 @@ class IdLval : public Lvalue {
   Node *node;
 
   std::string var;
-  int offset;
 };
 
 
@@ -860,6 +860,13 @@ class ArrayElem : public Lvalue {
 
   void sem() override{
       //TODO: implement???
+      var->sem();
+
+      //TODO: check that array index is valid!
+      //std::vector<Value*> arrayIndex = getIndexes();
+
+
+
   }
 
   std::string getName() override {
@@ -966,6 +973,12 @@ class Assign : public Stmt {
       var->sem();
       expr->sem();
       if(var->sem_type != expr->sem_type) logError("Type mismatch...");
+      std::clog << "Assign check sem complete" << std::endl;
+
+      var->updatelookup(); // in order to detect later if it has been assigned before use, a better name would be updateAssigned
+
+      std::clog << "Assign sem complete" << std::endl;
+
   }
   
   Value* compile() override {
@@ -983,8 +996,6 @@ class Assign : public Stmt {
 
 
     Value *lhs = var->compileAssign();
-
-    var->updatelookup();
 
 
     std::clog << "Compiled rhs" << std::endl;
@@ -1132,8 +1143,8 @@ class If : public Stmt {
     std::clog << "Called If compile!" << std::endl;
 
     //TODO: figure out if there is some better way other than doing this...
-    StmtList* stmtList1 = dynamic_cast<StmtList*>(stmt1);
-    StmtList* stmtList2 = dynamic_cast<StmtList*>(stmt2);
+//    StmtList* stmtList1 = dynamic_cast<StmtList*>(stmt1);
+//    StmtList* stmtList2 = dynamic_cast<StmtList*>(stmt2);
 
 
 
@@ -1567,10 +1578,10 @@ class FunctionHeader : public Stmt {
   void sem() override{
 
 
-      std::vector<Node*> argnodes;
-
       std::vector<FuncArg *> args = getArgs();
-      std::vector<Type*> argTypes = {};
+
+      argTypes = {};
+
       for(FuncArg *arg : args){
           //TODO: handle ref, pass as pointer
 
@@ -1601,9 +1612,13 @@ class FunctionHeader : public Stmt {
       Node *functionNode = new Node();
       functionNode->name = Tid;
       functionNode->decl_type = DECL_func;
+      functionNode->isCompiled = false;
+      std::clog << "Function Node set" << std::endl;
       //functionNode->function = F;
       //functionNode->funcargs = getArgs(); we do this on compile
       //functionNode->block = BB;
+
+      fnode = functionNode;
 
       st.insertNode(functionNode,DECL_func);
 
@@ -1625,55 +1640,63 @@ class FunctionHeader : public Stmt {
 
   Value* compile() override{
       std::clog << "FunctionHeader compile: " << std::endl;
-      //fpardef_list->compileVector();
+//      //fpardef_list->compileVector();
+//
+//
+//    // Make the function type:  double(double,double) etc.
+//
+//    DataType dtype = getReturnType();
+//
+//
+//    Type *type = getLlvmType(dtype);
+//
+//
+//    //args
+//
+//    std::vector<Node*> argnodes;
+//
+//    std::vector<FuncArg *> args = getArgs();
+//    std::vector<Type*> argTypes = {};
+//    for(FuncArg *arg : args){
+//      //TODO: handle ref, pass as pointer
+//
+//
+//      Node *node = new Node();
+//      node->name = arg->name;
+//      node->decl_type = DECL_var;
+//      node->type = arg->type;
+//      std::clog << "New node! :" << arg->name << " is Array: " << arg->isArray   << std::endl;
+//      node->llvm_type = getLlvmType(arg->type,arg->isArray);
+//      node->assigned = true;//we do this since its arguments and the args are assigned
+//      node->isPointer = arg->ref;
+//
+//
+//
+//      argnodes.push_back(node);
+//      std::clog << "Arg node: " << node->name << "is ref: "<<arg->ref <<  "is array: " <<arg->isArray << std::endl;
+//      if(arg->ref){
+//        argTypes.push_back(PointerType::get(node->llvm_type, 0));
+//      }else{
+//        argTypes.push_back(node->llvm_type);
+//      }
+//
+//
+//    }
 
-
-    // Make the function type:  double(double,double) etc.
+//    Node *funNode = st.lookupNode(Tid,DECL_func);
 
     DataType dtype = getReturnType();
 
 
     Type *type = getLlvmType(dtype);
 
-
-    //args
-
-    std::vector<Node*> argnodes;
-
-    std::vector<FuncArg *> args = getArgs();
-    std::vector<Type*> argTypes = {};
-    for(FuncArg *arg : args){
-      //TODO: handle ref, pass as pointer
-
-
-      Node *node = new Node();
-      node->name = arg->name;
-      node->decl_type = DECL_var;
-      node->type = arg->type;
-      std::clog << "New node! :" << arg->name << " is Array: " << arg->isArray   << std::endl;
-      node->llvm_type = getLlvmType(arg->type,arg->isArray);
-      node->assigned = true;//we do this since its arguments and the args are assigned
-      node->isPointer = arg->ref;
-
-
-
-      argnodes.push_back(node);
-      std::clog << "Arg node: " << node->name << "is ref: "<<arg->ref <<  "is array: " <<arg->isArray << std::endl;
-      if(arg->ref){
-        argTypes.push_back(PointerType::get(node->llvm_type, 0));
-      }else{
-        argTypes.push_back(node->llvm_type);
-      }
-
-
-    }
-
-
     FunctionType *FT = FunctionType::get(type,argTypes,false);
 
+      std::clog << "here" << std::endl;
 
 
     Function *F = Function::Create(FT, Function::ExternalLinkage, Tid,TheModule.get());
+      std::clog << "here2" << std::endl;
 
 
     func = F;
@@ -1684,15 +1707,13 @@ class FunctionHeader : public Stmt {
     BasicBlock *previousBB = Builder.GetInsertBlock();
 
     BasicBlock *BB = BasicBlock::Create(TheContext, Tid, F);
-    
-    Node *functionNode = new Node();
-    functionNode->name = Tid;
-    functionNode->decl_type = DECL_func;
-    functionNode->function = F;
-    functionNode->funcargs = getArgs();
-    functionNode->block = BB;
 
-    fnode = functionNode;
+    fnode->function = F;
+    fnode->funcargs = getArgs();
+    fnode->block = BB;
+    fnode->isCompiled = true;
+
+    //    fnode = functionNode;
 
     Builder.SetInsertPoint(BB);
 
@@ -1729,20 +1750,20 @@ class FunctionHeader : public Stmt {
 
 
 
+    //We do all the below in sem
+//    st.insertNode(functionNode,DECL_func);
+//
+//
+//    st.createScope(Tid); //add the name in scope
 
-    st.insertNode(functionNode,DECL_func);
 
 
-    st.createScope(Tid); //add the name in scope 
-
-
-
-    //adding arguments in the st
-    for(Node *node : argnodes){
-      st.insertNode(node,DECL_var);
-    }
-  
-    st.exitScope();
+//    //adding arguments in the st
+//    for(Node *node : argnodes){
+//      st.insertNode(node,DECL_var);
+//    }
+//
+//    st.exitScope();
 
     // std::clog << "Current Scope: " <<  st.currentScope()->name << std::endl;
 
@@ -1769,6 +1790,9 @@ class FunctionHeader : public Stmt {
     std::string Tid;
     FparDefList *fpardef_list;
     DataType type;
+
+    std::vector<Type*> argTypes;
+    std::vector<Node*> argnodes;
 
     Node *fnode;
 
@@ -1868,9 +1892,16 @@ class FunctionDef : public Stmt {
     std::clog << "FunctionDef funcname: " << funcName << std::endl;
     Node *node = st.lookupNode(funcName,DECL_func);
 
-    if(node == nullptr){
+    std::clog << "Function def lookup complete" << std::endl;
+
+    if(node == nullptr) {
+        logError("This shouldnt occur!");
+    }
+    else if(!node->isCompiled){
       //if not declared
+      std::clog << "About to compile header" << std::endl;
       header->compile();
+      std::clog << "Function: " << funcName << "header compiled" << std::endl;
       F = header->getFunction();
       BB = header->fnode->block;
     }
