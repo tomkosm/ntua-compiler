@@ -33,7 +33,8 @@ void yyerror(const char *s,int line);
 extern int yylineno;
 
 enum DataType 
-{   TYPE_int, 
+{   TYPE_UNDEFINED_ERROR,
+    TYPE_int,
     TYPE_char, 
     TYPE_nothing,
     TYPE_charList, //hidden
@@ -58,7 +59,7 @@ class AST {
   virtual Value* compile() const {std::clog << "Called ast const compile" <<std::endl; exit(2); return nullptr; }
   virtual Value* compile()  { std::clog << "Called ast compile" <<std::endl; exit(2); return nullptr; }
   virtual Node *compileArray() {std::clog << "Called ast compilearray" <<std::endl; exit(2);}
-  virtual void sem() {std::clog << "Called default sem!" << std::endl; exit(2);}
+  virtual void sem(){ logError("Called default sem");}
 
   std::string getName(){}
 
@@ -157,10 +158,25 @@ class AST {
       Function::Create(strcpy_type, Function::ExternalLinkage,
                        "strcpy", TheModule.get());
 
+    FunctionType *ascii_type =
+          FunctionType::get(i64, {i8}, false);
 
 
+    Theascii =
+      Function::Create(ascii_type, Function::ExternalLinkage,
+                       "ascii", TheModule.get());
 
-    //do sem analysis
+
+    FunctionType *chr_type =
+          FunctionType::get(i8, {i64}, false);
+
+
+    Thechr =
+          Function::Create(chr_type, Function::ExternalLinkage,
+                           "chr", TheModule.get());
+
+
+      //do sem analysis
     sem();
 
     std::clog << "Sem analysis is now complete!" << std::endl;
@@ -255,8 +271,12 @@ class AST {
 
   static Function *Thestrcpy;
 
+    static Function *Theascii;
 
-  static Type *i8;
+    static Function *Thechr;
+
+
+    static Type *i8;
   static Type *i32;
   static Type *i64;
 
@@ -276,7 +296,13 @@ class AST {
   //not sure if we can put that somewhere else?
     std::map<std::string, int> LIBRARY_FUNCTIONS = {
             {"writeInteger", 1},
-            {"writeString", 1}
+            {"writeString", 1},
+            {"strlen",1},
+            {"readInteger",1},
+            {"writeChar",1},
+            {"ascii",1},
+            {"strcpy",1},
+            {"chr",1}
     };
 
 
@@ -285,6 +311,7 @@ class AST {
 
 inline std::ostream &operator<<(std::ostream &out, DataType t) {
   switch (t) {
+      case TYPE_UNDEFINED_ERROR: out << "TYPE_UNDEFINED_ERROR" ; break;
     case TYPE_int:  out << "TYPE_int";  break;
     case TYPE_char: out << "TYPE_char"; break;
     case TYPE_nothing: out << "TYPE_nothing"; break;
@@ -307,11 +334,14 @@ class Expr : virtual public AST {
     virtual Value* compileAssign() { std::clog << "Called Lvalue compileAssign!" << std::endl; return nullptr; }
     virtual std::vector<int> getArraySize() { std::clog << "Called default Lvalue getArraySize!" << std::endl; exit(2);}
     void check_type(DataType t){
-      sem();
-      std::clog << "Check_TYPE " << sem_type << " " << t << std::endl;
-//      printAST(std::clog);
-//      std::clog << std::endl;
-      if(sem_type != t) logError("Type mismatch");
+        sem();
+        if(sem_type == TYPE_UNDEFINED_ERROR)
+            logError("Should never return TYPE_UNDEFINED_ERROR");
+
+        std::clog << "Check_TYPE " << sem_type << " " << t << std::endl;
+        //      printAST(std::clog);
+        //      std::clog << std::endl;
+        if(sem_type != t) logError("Type mismatch");
     }
 
 
@@ -415,12 +445,14 @@ class Stmt : virtual public AST {
   void name(){std::clog << "Stmt name" << std::endl;}
 
 
-  virtual Value* compile() override {};
   void printAST(std::ostream &out) const override {
     out << "Stmt(empty)";
   }
 
+  virtual Value* compile() override  { std::clog << "Called STMT compile" <<std::endl; exit(2); return nullptr; }
+
   virtual bool isReturn(){return false;}
+
 
 //   virtual void execute() const = 0;
 };
@@ -516,7 +548,7 @@ class VarDec : public Stmt {
 
     //      idNode->var = gVar;
     //
-            idNode->llvm_type = getLlvmType(idNode->type,idNode->array_size.size() != 0);
+//            idNode->llvm_type = getLlvmType(idNode->type,idNode->array_size.size() != 0);
           idNode->assigned = false;
           idNode->isPointer = true;
 
@@ -530,20 +562,19 @@ class VarDec : public Stmt {
 
   Value* compile() override {
 
-    Type * itype;
     int initializerSize;
 
-
-
+    Type * itype;
+    itype = getLlvmType(type->getType(),false);
     std::vector<int> arraysizes = type->getSizes();
 
     Constant* Initializer;
-    ArrayType* ArrayTy;
     std::clog << "Array size: " << arraysizes.size() << std::endl;
     if(arraysizes.size() == 0){
       //Initializer = 0;
 //      Initializer = ConstantInt::get(TheContext, llvm::APInt(initializerSize, 0));
         Initializer = ConstantInt::get(getLlvmType(type->getType(),false), 0);
+
     }else if(arraysizes.size() >= 1){
         //do this in getLLvmType TODO:
 
@@ -559,11 +590,15 @@ class VarDec : public Stmt {
       //Type *ltype = itype;
       Initializer = c64(0);
 
+      ArrayType* ArrayTy;
+
       std::vector<llvm::Constant*> arrayElems;
       for(auto size : arraysizes) {
 
-
+        std::clog << "Itype size: " << size << std::endl;
         ArrayTy = ArrayType::get(itype, size);
+        std::clog << "hereee" << std::endl;
+
         itype = ArrayTy;
 
         arrayElems = {static_cast<unsigned long>(size),Initializer};
@@ -592,7 +627,7 @@ class VarDec : public Stmt {
 
       GlobalVariable *gVar = new llvm::GlobalVariable(
         *TheModule,
-        node->llvm_type,
+        itype,
         false, // isConstant
         GlobalValue::ExternalLinkage,
         Initializer, // Initializer
@@ -605,6 +640,7 @@ class VarDec : public Stmt {
 
 
       node->var = gVar;
+      node->llvm_type = itype;
 //      Node *idNode = new Node();
 //      idNode->name = id->getName();
 //      idNode->type = type->getType();
@@ -723,7 +759,9 @@ class Lvalue : public Expr {
     virtual Value* compileAssign() { std::clog << "Called Lvalue compileAssign!" << std::endl; return nullptr; }
     virtual void updatelookup() {}
     virtual std::vector<Value *> getIndexes() {std::clog << "Called Lvalue getIndexes!" << std::endl; exit(2);}
-  
+
+//    DataType sem_type;
+
 //  public:
 //   virtual void execute() const = 0;
 };
@@ -749,6 +787,8 @@ class IdLval : public Lvalue {
 //         logError("Error, tried to access a variable that isnt assigned");
      else
         sem_type = idNode->type;
+
+     std::clog << sem_type << std::endl;
      node = idNode;
         //TODO: does this work for pointer? do we need new types?
           //
@@ -862,6 +902,11 @@ class ArrayElem : public Lvalue {
       //TODO: implement???
       var->sem();
 
+      std::clog << "Array elem "<< std::endl;
+
+      //TODO?
+      sem_type = var->sem_type;
+
       //TODO: check that array index is valid!
       //std::vector<Value*> arrayIndex = getIndexes();
 
@@ -971,7 +1016,13 @@ class Assign : public Stmt {
 
   void sem() override{
       var->sem();
+//      std::clog << var->sem_type << std::endl;
       expr->sem();
+      std::clog << var->sem_type << " and " << expr->sem_type << std::endl;
+
+      if(var->sem_type == TYPE_UNDEFINED_ERROR or expr->sem_type == TYPE_UNDEFINED_ERROR)
+          logError("Should never return TYPE_UNDEFINED_ERROR");
+
       if(var->sem_type != expr->sem_type) logError("Type mismatch...");
       std::clog << "Assign check sem complete" << std::endl;
 
@@ -1025,6 +1076,10 @@ class Return : public Stmt {
   ~Return() { delete expr;  }
   void printAST(std::ostream &out) const override {
     out << "Return(" << *expr << ")";
+  }
+
+  void sem(){
+    //TODO: check that expr type matches function!
   }
 
 
@@ -1281,11 +1336,12 @@ class While : public Stmt {
 
     Builder.SetInsertPoint(DoBB);
     std::clog << "About top stmt compile: " << std::endl;
+    std::clog << line << std::endl;
 
-    //TODO: figure out if there is some better way other than doing this...
-    StmtList* stmtList = dynamic_cast<StmtList*>(stmt);
 
-    stmtList->compile();
+    stmt->compile();
+
+
 
     Builder.CreateBr(ConditionBB);
 
@@ -2190,7 +2246,14 @@ class FuncCall : public Stmt, public Expr {
       if(functionNode == nullptr && LIBRARY_FUNCTIONS.find(id) == LIBRARY_FUNCTIONS.end())// if the function is not in Symbol Table or LIBRARY
             logError("Function named: " + id + " hasnt been declared");
 
-      sem_type = TYPE_int;
+      //TODO: fix this
+      if(id == "chr"){
+          sem_type = TYPE_char;
+      }
+      else
+        sem_type = TYPE_int; //TODO: fix this and return based on func
+
+
   }
   Value* compile() override{
     std::clog << "Compiling function call: " << id << std::endl;
@@ -2298,6 +2361,20 @@ class FuncCall : public Stmt, public Expr {
           func = Thestrcpy;
 
         }
+        else if(id == "ascii"){
+
+            args = expr_list->compileVector();
+
+            func = Theascii;
+
+        }
+        else if(id == "chr"){
+
+            args = expr_list->compileVector();
+
+            func = Thechr;
+
+        }
           else{
           std::cerr << "Function " << id << " not declared" << std::endl;
           exit(1);
@@ -2313,7 +2390,7 @@ class FuncCall : public Stmt, public Expr {
     Value *res = Builder.CreateCall(func, args);
 
 
-    if(id == "readInteger" || id == "strlen"){
+    if(id == "readInteger" || id == "strlen" || id == "ascii"){
       
       return Builder.CreateSExt(res, i64, "cast");
       //return Builder.CreateTrunc(res, i32, "cast");
