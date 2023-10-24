@@ -840,10 +840,11 @@ class IdLval : public Lvalue {
     
     Node* idNode = st.lookupNode(var);
     if(idNode == nullptr){
-      //
-      std::clog << st.currentScope()->name << std::endl;
-      std::cerr << "Error: variable " << var << " not declared" << std::endl;
-      exit(1);
+
+      logError("Variable: "+ var + " not declared");
+//      std::clog << st.currentScope()->name << std::endl;
+//      std::cerr << "Error: variable " << var << " not declared" << std::endl;
+//      exit(1);
     }
 
     Value * gvar = idNode->var;
@@ -1956,6 +1957,12 @@ class FunctionDef : public Stmt {
 
   void sem() override{
 
+      DataType funRetType = header->getReturnType();
+
+      if(funRetType != TYPE_nothing && !stmt_list->isReturn())
+          logError("Function doesnt return");   //TODO: line shows the end of the function, check if thats what i want
+
+
 
       std::string funcName = header->getTid(); //funcname is Tid ?
 
@@ -2536,6 +2543,10 @@ class StringConst : public Lvalue {
               ++i;  // Skip the next character
               break;
             // Add other escape sequences as needed...
+            case '\'':
+              output.push_back('\'');
+              i++;
+              break;
             default:
               output.push_back(input[i]);
               break;
