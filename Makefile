@@ -1,5 +1,5 @@
 .PHONY: clean distclean default
-
+MAKEFLAGS += -j4
 LLVMCONFIG=llvm-config
 
 CXX=clang++
