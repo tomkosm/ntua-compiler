@@ -42,6 +42,9 @@ struct Node{
     DeclType decl_type;
     std::string name;
 
+    //for vardec
+    std::vector<int> arraysizes;
+
     Value *var;
     Function *function;
     llvm::Type *llvm_type;
@@ -49,6 +52,8 @@ struct Node{
     //for func
     std::vector<FuncArg *> funcargs;
     std::vector<int> array_size;
+
+    bool isCompiled; //atm used for function
     bool isPointer;
 
     bool isArgument;
@@ -90,7 +95,7 @@ class SymbolTable{
     }
 
     void createScope(std::string scope_name){//types too?
-    
+        //create and enters
         ScopeEntry *new_scope = new ScopeEntry;
         new_scope->name = scope_name;
         new_scope->parent = current_scope;
