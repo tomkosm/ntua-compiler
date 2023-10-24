@@ -89,6 +89,9 @@ class AST {
 
 
   void llvm_compile_and_dump(bool optimize=false) {
+
+      std::clog << "Optimizations: " << optimize << std::endl;
+
     // Initialize
     TheModule = std::make_unique<Module>("Grace", TheContext);
     

@@ -130,11 +130,14 @@
 
 
 
+%{
+int optimizations;
+%}
 
 
 %%
 
-program : func-def  { std::clog << "AST: " << *$1 << std::endl; $1->firstFunction = true;  $1->llvm_compile_and_dump();  }
+program : func-def  { std::clog << "AST: " << *$1 << std::endl; $1->firstFunction = true;  $1->llvm_compile_and_dump(optimizations);  }
 ;
 
 local-def_list :
@@ -311,10 +314,20 @@ void yyerror(const char *msg,int line) {
 }
 
 int main(int argc, char** argv) {
+    std::vector<std::string> args(argv, argv + argc);
 
-    for(int i = 0; i < argc; i++) {
-        std::clog << "Argument" <<  i << " " <<  argv[i] << std::endl;
+    // Now you can access the arguments as std::string using args[i]
+    for (const auto& arg : args) {
+        std::clog << "Argument" <<  arg << std::endl;
+        if(arg == "-O"){
+            std::clog << "Optimize? " << std::endl;
+            optimizations = true;
+        }
+
     }
+
+
+
   extern int yydebug;
   //yydebug = 0;
   // #ifdef YYDEBUG
