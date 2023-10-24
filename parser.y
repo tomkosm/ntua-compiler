@@ -172,7 +172,7 @@ id_list :
 ;
 
 //func def
-fpar-def : ref_optional T_id id_list ':' fpar-type { $3->add(new Id($2)); $$ = new FparDef($1,new VarDec($3,new TypeDef(TYPE_int,new ArraySize())),$5); }
+fpar-def : ref_optional T_id id_list ':' fpar-type { $3->add_front(new Id($2)); $$ = new FparDef($1,new VarDec($3,new TypeDef(TYPE_int,new ArraySize())),$5); }
 ;
 
 data-type :

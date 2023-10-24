@@ -412,7 +412,8 @@ class IdList : public AST {
   ~IdList() {
     for (Id *d : id_list) delete d;
   }
-  void add(Id *d) { id_list.push_front(d); }
+  void add_front(Id *d) { id_list.push_front(d); }
+  void add(Id *d) { id_list.push_back(d); }
 
   void sem() override{
       for (Id *d : id_list) d->sem();
@@ -1250,11 +1251,11 @@ class If : public Stmt {
 
       std::clog << "Before cond" << std::endl;
 
-    Value *condition = cond->compile(ThenBB,AfterBB);
     std::clog << "After cond" << std::endl;
 
       //if there is no else statement
     if(stmt2 == nullptr){
+      Value *condition = cond->compile(ThenBB,AfterBB);
 
       Builder.CreateCondBr(condition, ThenBB, AfterBB);
       Builder.SetInsertPoint(ThenBB);
@@ -1274,6 +1275,8 @@ class If : public Stmt {
     }else{
       BasicBlock *ElseBB =
         BasicBlock::Create(TheContext, "else", TheFunction);
+
+      Value *condition = cond->compile(ThenBB,ElseBB);
 
       Builder.CreateCondBr(condition, ThenBB, ElseBB);
       Builder.SetInsertPoint(ThenBB);
@@ -1560,6 +1563,8 @@ class FparDef : public Stmt {
 
   std::vector<FuncArg *> getArgs(){
     std::vector<Id *> ids = id_list->getIds();
+
+//    std::reverse(ids.begin(), ids.end());
 
     std::vector<FuncArg *> args;
 
@@ -2089,6 +2094,8 @@ class BinOpCond : public Cond {
       sem_type = TYPE_bool;
   }
 
+  //after or else!
+  //then aka do
   Value *compile(BasicBlock *thenBB, BasicBlock *afterBB) override{
 
 
