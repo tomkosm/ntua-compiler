@@ -63,7 +63,7 @@ class AST {
 
   std::string getName(){}
 
-  Type* getLlvmType(DataType dtype,bool isArray=false){
+  Type* getLlvmType(DataType dtype,std::vector<int> array_size={}){
 
     Type *itype;
 
@@ -77,18 +77,59 @@ class AST {
         std::clog << "Error, couldnt find type!" << std::endl;
         exit(2);
     }
-    if(isArray){
+    if(array_size.size() > 0){
+        std::reverse(array_size.begin(), array_size.end());
+        ArrayType* ArrayTy;
       //TODO: handle multi dim?
+      //check order
+        for(auto size : array_size) {
+            ArrayTy = ArrayType::get(itype, size);
+            itype = ArrayTy;
+        }
         std::clog << "Hereeee!!!!!!!" << std::endl;
-        ArrayType* ArrayTy = ArrayType::get(itype, 0);
-        itype = ArrayTy;
+
     }
+
+
+
+//      std::reverse(arraysizes.begin(), arraysizes.end());
+
+
+
+//      std::clog << "Array size: " << arraysizes[0] << " " << arraysizes[1] << std::endl;
+      //wrong need to handle multi dim
+
+//      //Type *ltype = itype;
+//      Initializer = c64(0);
+//
+//      ArrayType* ArrayTy;
+//
+//      std::vector<llvm::Constant*> arrayElems;
+//      for(auto size : arraysizes) {
+//
+//          std::clog << "Itype size: " << size << std::endl;
+//          ArrayTy = ArrayType::get(itype, size);
+//          std::clog << "hereee" << std::endl;
+//
+//          itype = ArrayTy;
+//
+//          arrayElems = {static_cast<unsigned long>(size),Initializer};
+//
+//          Initializer = ConstantArray::get(ArrayTy,arrayElems);
+//
+//
+//      }
 
     return itype;
   }
 
+//  Initializer * getLlvmTypeInitializer (DataType dtype,std::vector<int> array_size={}) {
+//    //TODO: implement
+//
+//  }
 
-  void llvm_compile_and_dump(bool optimize=false) {
+
+      void llvm_compile_and_dump(bool optimize=false) {
 
       std::clog << "Optimizations: " << optimize << std::endl;
 
@@ -359,6 +400,7 @@ class Expr : virtual public AST {
     virtual Value* compileAssign() { std::clog << "Called Lvalue compileAssign!" << std::endl; return nullptr; }
     virtual std::vector<int> getArraySize() { std::clog << "Called default Lvalue getArraySize!" << std::endl; exit(2);}
     void check_type(DataType t){
+        //TODO: needs to also check array/array size
         sem();
         if(sem_type == TYPE_UNDEFINED_ERROR)
             logError("Should never return TYPE_UNDEFINED_ERROR");
@@ -588,62 +630,18 @@ class VarDec : public Stmt {
 
   Value* compile() override {
 
-    int initializerSize;
 
     Type * itype;
-    itype = getLlvmType(type->getType(),false);
+
     std::vector<int> arraysizes = type->getSizes();
 
-    Constant* Initializer;
+    itype = getLlvmType(type->getType(),arraysizes);
+
+    Constant* Initializer = ConstantAggregateZero::get(itype);
     std::clog << "Array size: " << arraysizes.size() << std::endl;
-    if(arraysizes.size() == 0){
-      //Initializer = 0;
-//      Initializer = ConstantInt::get(TheContext, llvm::APInt(initializerSize, 0));
-        Initializer = ConstantInt::get(getLlvmType(type->getType(),false), 0);
-
-    }else if(arraysizes.size() >= 1){
-        //do this in getLLvmType TODO:
-
-      //we reverse it so we get last first
-
-      std::reverse(arraysizes.begin(), arraysizes.end());
 
 
-
-      std::clog << "Array size: " << arraysizes[0] << " " << arraysizes[1] << std::endl;
-      //wrong need to handle multi dim
-      
-      //Type *ltype = itype;
-      Initializer = c64(0);
-
-      ArrayType* ArrayTy;
-
-      std::vector<llvm::Constant*> arrayElems;
-      for(auto size : arraysizes) {
-
-        std::clog << "Itype size: " << size << std::endl;
-        ArrayTy = ArrayType::get(itype, size);
-        std::clog << "hereee" << std::endl;
-
-        itype = ArrayTy;
-
-        arrayElems = {static_cast<unsigned long>(size),Initializer};
-
-        Initializer = ConstantArray::get(ArrayTy,arrayElems);
-
-
-      }
-
-      
-      // std::vector<Constant*> constArray(arraysizes[0], ConstantInt::get(TheContext, APInt(32, 0)));
-      // Initializer = ConstantArray::get(ArrayTy, constArray);
-
-      // itype = ArrayTy;
-    }
-
-    //start here
-
-    //TODO: issues if multiple same name etc 
+    //TODO: issues if multiple same name etc
     for(auto id : id_list->getIds()) {
       std::clog << "Compiling VarDec name: " << id->getName() << " Current scope: " << st.currentScope()->name << std::endl; 
 
@@ -660,26 +658,13 @@ class VarDec : public Stmt {
         id->getName()+"_var"
       );
 
-
+      gVar->setAlignment(Align(8));
 
       std::clog << "Alloc " << id->getName() << std::endl;
 
-
       node->var = gVar;
       node->llvm_type = itype;
-//      Node *idNode = new Node();
-//      idNode->name = id->getName();
-//      idNode->type = type->getType();
-//      idNode->decl_type = DECL_var;
-//      idNode->var = gVar;
-//      idNode->llvm_type = itype;
-//      idNode->assigned = false;
-//      idNode->isPointer = true;
-//
-//      std::clog << "Created node" << std::endl;
-//      st.insertNode(idNode);
-//
-//      std::clog << "Inserted node" << std::endl;
+
 
     }
 
@@ -872,16 +857,18 @@ class IdLval : public Lvalue {
 //    }
 
     if(!node->isPointer){
-      return gvar;
+        return gvar;
     }else{
-      return Builder.CreateLoad(node->llvm_type,gvar, var + "_load");
+        LoadInst* load = Builder.CreateLoad(node->llvm_type,gvar, var + "_load");
+        load->setAlignment(Align(8));
+        return load;
     }
 
 
   }
 
   std::vector<Value *> getIndexes() override{
-    std::vector<Value *> v = {c64(0)};
+    std::vector<Value *> v = {};
     return v;
   }
 
@@ -959,6 +946,7 @@ class ArrayElem : public Lvalue {
 
     std::vector<Value*> arrayIndex = getIndexes();
 
+//    std::clog << arrayIndex[0]->getName() << std::endl;
 
 
 
@@ -967,24 +955,16 @@ class ArrayElem : public Lvalue {
     node = array;
 
     std::clog << "before gep!!!!!!!!!!!!!!!! " << var->getName() << std::endl;
-    //Value *v = Builder.CreateInBoundsGEP({i8},array->var,arrayIndex,var->getName()+"_arrayElem_arg");
-    std::clog << "after gep" << std::endl;
-    // std::clog << *array->var->getType() << std::endl;
-    //TODO: would first work for both?
-    // if(array->isPointer){
+
 
 
         //ArrayType* ArrayTy = ArrayType::get(i8, 0);
 
-
+        std::clog << arrayIndex.size() << std::endl;
         std::clog <<"here" << std::endl;
         std::clog << line << std::endl;
        return Builder.CreateInBoundsGEP(array->llvm_type,array->var,arrayIndex,var->getName()+"_arrayElem_arg");
-    // }else{
-    //   Value *elementPtr = Builder.CreateGEP(array->llvm_type,array->var, arrayIndex, var->getName()+"_arrayElem");     
-    
-    //   return elementPtr;
-    // }
+
 
   }
 
@@ -1010,10 +990,11 @@ class ArrayElem : public Lvalue {
 
 
     Type* elementType = getLlvmType(node->type); //?
-    
 
-    Value* elementValue = Builder.CreateLoad(elementType,elementPtr, "elementValue");
 
+    LoadInst* elementValue = Builder.CreateLoad(elementType,elementPtr, "elementValue");
+
+    elementValue->setAlignment(Align(8));
     return elementValue;
 
     
@@ -1080,8 +1061,8 @@ class Assign : public Stmt {
     std::clog << "Compiled rhs" << std::endl;
 
     // Store the constant value into the alloca.
-    Builder.CreateStore(rhs, lhs);
-
+    StoreInst* store = Builder.CreateStore(rhs, lhs);
+    store->setAlignment(Align(8));
     std::clog << "Created store!" << std::endl;
 
 
@@ -1236,10 +1217,6 @@ class If : public Stmt {
 
 
     std::clog << "Called If compile!" << std::endl;
-
-    //TODO: figure out if there is some better way other than doing this...
-//    StmtList* stmtList1 = dynamic_cast<StmtList*>(stmt1);
-//    StmtList* stmtList2 = dynamic_cast<StmtList*>(stmt2);
 
 
 
@@ -1576,7 +1553,7 @@ class FparDef : public Stmt {
       FuncArg *arg = new FuncArg();
       arg->type = fpar_type->getType();
       arg->isArray = fpar_type->isArray();
-      // arg->array_size = fpar_type->getArraySizes();
+      arg->array_size = fpar_type->getArraySizes();
       arg->name = id->getName();
 
       arg->ref = ref->getRef();
@@ -1696,7 +1673,8 @@ class FunctionHeader : public Stmt {
           node->decl_type = DECL_var;
           node->type = arg->type;
           std::clog << "New node! :" << arg->name << " is Array: " << arg->isArray   << std::endl;
-          node->llvm_type = getLlvmType(arg->type,arg->isArray);
+          node->array_size = arg->array_size;
+          node->llvm_type = getLlvmType(arg->type,node->array_size);
           node->assigned = true;//we do this since its arguments and the args are assigned
           node->isPointer = arg->ref;
 
@@ -1793,7 +1771,7 @@ class FunctionHeader : public Stmt {
     DataType dtype = getReturnType();
 
 
-    Type *type = getLlvmType(dtype);
+    Type *type = getLlvmType(dtype); // function cant return array?
 
     FunctionType *FT = FunctionType::get(type,argTypes,false);
 
@@ -1836,7 +1814,10 @@ class FunctionHeader : public Stmt {
         //null ptr needs to be arraySize if exists!
         llvm::AllocaInst* Alloca = Builder.CreateAlloca(argnodes[Idx]->llvm_type, nullptr, argnodes[Idx]->name+"_funcarg");
         //AllocaInst *Alloca = CreateEntryBlockAlloca(F, argnodes[Idx]->name, argnodes[Idx]->llvm_type);
-        Builder.CreateStore(&Arg, Alloca);
+        StoreInst* store = Builder.CreateStore(&Arg, Alloca);
+
+        store->setAlignment(Align(8));
+
         argnodes[Idx]->var = Alloca;
         argnodes[Idx]->isPointer = true;
       }
@@ -2112,37 +2093,24 @@ class BinOpCond : public Cond {
     std::clog << "Compiling binopcond "<< std::endl;
 
     Function *TheFunction = Builder.GetInsertBlock()->getParent();
-    BasicBlock *BB = Builder.GetInsertBlock();
+
 
     Value *leftValue = expr1->compile();
+    BasicBlock *evalRightBB = BasicBlock::Create(TheContext, "evalRight", TheFunction);
 
     if(op == "and"){
-        BasicBlock *evalRightBB = BasicBlock::Create(TheContext, "evalRight", TheFunction);
 
         //if true and false -> evaluate left an
         Builder.CreateCondBr(leftValue, evalRightBB, afterBB);
-
-
-        Builder.SetInsertPoint(evalRightBB);
-
-        return expr2->compile();  // evaluate right expression
-
-
     }
     else if(op == "or"){
 
-        BasicBlock *evalRightBB = BasicBlock::Create(TheContext, "evalRight", TheFunction);
-
         Builder.CreateCondBr(leftValue,thenBB,evalRightBB);
-
-
-        Builder.SetInsertPoint(evalRightBB);
-
-        return expr2->compile();  // evaluate right expression
-
-
-        //      return Builder.CreateOr(expr1->compile(), expr2->compile(), "ortmp");
     }
+      Builder.SetInsertPoint(evalRightBB);
+
+      return expr2->compile();  // evaluate right expression
+
   }
  private:
   Expr *expr1;
@@ -2569,11 +2537,12 @@ class StringConst : public Lvalue {
 
     GlobalVariable *gv = new GlobalVariable(*TheModule,
                                                       strConstant->getType(),
-                                                      false, //we dont trully want this as constant.. 
+                                                      false, //we dont trully want this as constant..
                                                       GlobalValue::PrivateLinkage,
                                                       strConstant,
                                                       "str_const");
 
+    gv->setAlignment(Align(8));
 
     return gv;
 

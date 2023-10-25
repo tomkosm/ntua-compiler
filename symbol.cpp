@@ -29,8 +29,8 @@ struct FuncArg{
 
     DataType type;
     bool isArray;
-    
-    // ArraySize *array_size;
+
+    std::vector<int> array_size;
 
 };
 
@@ -52,6 +52,8 @@ struct Node{
     //for func
     std::vector<FuncArg *> funcargs;
     std::vector<int> array_size;
+
+    //
 
     bool isCompiled; //atm used for function
     bool isPointer;
