@@ -619,6 +619,7 @@ class VarDec : public Stmt {
 //            idNode->llvm_type = getLlvmType(idNode->type,idNode->array_size.size() != 0);
           idNode->assigned = false;
           idNode->isPointer = true;
+          idNode->isArgument = false;
 
           st.insertNode(idNode);
       }
@@ -870,7 +871,7 @@ class IdLval : public Lvalue {
   }
 
   std::vector<Value *> getIndexes() override{
-    std::vector<Value *> v = {};
+    std::vector<Value *> v = {}; //This is needed , its the base pointer for an array!
     return v;
   }
 
@@ -947,6 +948,13 @@ class ArrayElem : public Lvalue {
 
 
     std::vector<Value*> arrayIndex = getIndexes();
+
+    //insert c64(0) as first element
+    //on arrays first indice is 0
+    //on pointers its not
+    //arguments are pointers ? always?//TODO:
+    if(!array->isArgument)
+        arrayIndex.insert(arrayIndex.begin(), c64(0));
 
 //    std::clog << arrayIndex[0]->getName() << std::endl;
 
@@ -1679,7 +1687,7 @@ class FunctionHeader : public Stmt {
           node->llvm_type = getLlvmType(arg->type,node->array_size);
           node->assigned = true;//we do this since its arguments and the args are assigned
           node->isPointer = arg->ref;
-
+          node->isArgument = true;
 
 
           argnodes.push_back(node);
