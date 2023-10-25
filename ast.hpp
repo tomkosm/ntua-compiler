@@ -649,14 +649,16 @@ class VarDec : public Stmt {
 
       Node* node = st.lookupNode(id->getName(),DECL_var);
 
-      GlobalVariable *gVar = new llvm::GlobalVariable(
-        *TheModule,
-        itype,
-        false, // isConstant
-        GlobalValue::ExternalLinkage,
-        Initializer, // Initializer
-        id->getName()+"_var"
-      );
+
+        AllocaInst* gVar = Builder.CreateAlloca(itype, nullptr, id->getName()+"_var");
+//      GlobalVariable *gVar = new llvm::GlobalVariable(
+//        *TheModule,
+//        itype,
+//        false, // isConstant
+//        GlobalValue::ExternalLinkage,
+//        Initializer, // Initializer
+//        id->getName()+"_var"
+//      );
 
       gVar->setAlignment(Align(8));
 
@@ -963,7 +965,7 @@ class ArrayElem : public Lvalue {
         std::clog << arrayIndex.size() << std::endl;
         std::clog <<"here" << std::endl;
         std::clog << line << std::endl;
-       return Builder.CreateInBoundsGEP(array->llvm_type,array->var,arrayIndex,var->getName()+"_arrayElem_arg");
+        return Builder.CreateInBoundsGEP(array->llvm_type,array->var,arrayIndex,var->getName()+"_arrayElem_arg");
 
 
   }
@@ -1684,6 +1686,8 @@ class FunctionHeader : public Stmt {
           std::clog << "Arg node: " << node->name << "is ref: "<<arg->ref <<  "is array: " <<arg->isArray << std::endl;
           if(arg->ref){
               argTypes.push_back(PointerType::get(node->llvm_type, 0));
+//              node->llvm_type = PointerType::get(node->llvm_type, 0);
+
           }else{
               argTypes.push_back(node->llvm_type);
           }
@@ -1812,7 +1816,7 @@ class FunctionHeader : public Stmt {
       }
       else{
         //null ptr needs to be arraySize if exists!
-        llvm::AllocaInst* Alloca = Builder.CreateAlloca(argnodes[Idx]->llvm_type, nullptr, argnodes[Idx]->name+"_funcarg");
+        AllocaInst* Alloca = Builder.CreateAlloca(argnodes[Idx]->llvm_type, nullptr, argnodes[Idx]->name+"_funcarg");
         //AllocaInst *Alloca = CreateEntryBlockAlloca(F, argnodes[Idx]->name, argnodes[Idx]->llvm_type);
         StoreInst* store = Builder.CreateStore(&Arg, Alloca);
 
