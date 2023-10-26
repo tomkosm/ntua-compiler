@@ -65,7 +65,7 @@
 %nonassoc<var> UPLUS UMINUS
 
 
-%expect 2 /* ??? wrong ?*/
+%expect 1
 
 %union {
 
@@ -79,6 +79,7 @@
   Stmt *stmt;
   VarDec *vardec;
   FparType *fpar_type;
+  FparArray *fpar_array;
   ArraySize *array_size;
   FparDef *fpar_def;
   IdList *id_list;
@@ -125,13 +126,14 @@
 %type<fpar_def_list> fpar-def_list fpar-def_helper
 %type<func_def> func-def
 %type<local_def_list> local-def_list
+%type<fpar_array> fpar-array
 
 %type<var> any-compare-operator
 
 
 
 %{
-int optimizations;
+bool optimizations;
 %}
 
 
@@ -185,7 +187,7 @@ data-type :
 
 array-size:
 /*nothing*/ { $$ = new ArraySize(); }
-| array-size '[' T_const_num ']' { $1->add($3); $$ = $1;}
+| '[' T_const_num ']' array-size  { $4->add($2); $$ = $4;}
 ;
 
 
@@ -202,8 +204,15 @@ array-size-empty:
 | '[' ']' { $$ = true; }
 ;
 
-fpar-type : data-type array-size-empty array-size { $$ = new FparType($1,$2,$3); }
+fpar-array :
+  '[' ']' array-size {$$ = new FparArray(true,$3);}
+| array-size {$$ = new FparArray(false,$1);}
 ;
+
+fpar-type : data-type fpar-array { $$ = new FparType($1,$2); }
+;
+
+
 
 local-def : 
   func-def { $$ = $1; }

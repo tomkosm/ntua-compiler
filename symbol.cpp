@@ -58,7 +58,7 @@ struct Node{
     bool isCompiled; //atm used for function
     bool isPointer;
 
-    bool isArgument;
+    bool isFirstArrayDimUnbounded;
 
     BasicBlock *block;
 

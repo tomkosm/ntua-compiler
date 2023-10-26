@@ -534,6 +534,7 @@ class ArraySize : public Stmt {
 
 
   void add(int s) { array_list.push_back(s); }
+  void add_front(int s) {array_list.push_front(s);}
 
   void sem() override {
     //TODO: figure out what testing we need
@@ -550,12 +551,15 @@ class ArraySize : public Stmt {
     out << ")";
   }
 
-  std::vector<int> getSizes() const { return array_list;}
+  std::vector<int> getSizes() const {
+      return std::vector<int>(array_list.begin(), array_list.end());
+      //return array_list;
+  }
 
   
 
  private:
-  std::vector<int> array_list;
+  std::deque<int> array_list;
 };
 
 
@@ -619,7 +623,7 @@ class VarDec : public Stmt {
 //            idNode->llvm_type = getLlvmType(idNode->type,idNode->array_size.size() != 0);
           idNode->assigned = false;
           idNode->isPointer = true;
-          idNode->isArgument = false;
+          idNode->isFirstArrayDimUnbounded = false;
 
           st.insertNode(idNode);
       }
@@ -952,8 +956,8 @@ class ArrayElem : public Lvalue {
     //insert c64(0) as first element
     //on arrays first indice is 0
     //on pointers its not
-    //arguments are pointers ? always?//TODO:
-    if(!array->isArgument)
+    //arguments are pointers ? always?//TODO: explain this way better
+    if(!array->isFirstArrayDimUnbounded)
         arrayIndex.insert(arrayIndex.begin(), c64(0));
 
 //    std::clog << arrayIndex[0]->getName() << std::endl;
@@ -1495,18 +1499,45 @@ class Ref : public Stmt {
 
 
 
+class FparArray : public Stmt {
+public:
+    FparArray(bool e, ArraySize *a) : firstArraySizeEmpty(e),array_size(a) {}
+    ~FparArray() {
+        delete array_size;
+    }
 
+    void printAST(std::ostream &out) const override {
+        out << "FparArray(" << firstArraySizeEmpty << ", " << *array_size << ")";
+    }
+
+
+    //maybe throw in somwhere there the firstArraySizeEmpty?
+    std::vector<int> getSizes() const {
+        return array_size->getSizes();
+        //return array_list;
+    }
+
+    bool farraySizeEmpty(){
+        return firstArraySizeEmpty;
+    }
+
+private:
+    bool firstArraySizeEmpty;
+
+    ArraySize *array_size;
+
+};
 
 
 class FparType : public Stmt {
  public:
-  FparType(DataType t, bool e, ArraySize *a) : type(t),arrySizeEmpty(e),array_size(a) {}
+  FparType(DataType t, FparArray *a) : type(t),fpar_array(a) {}
   ~FparType() {
     delete array_size;
   }
 
   void printAST(std::ostream &out) const override {
-    out << "FparType("<< type<< ", " << arrySizeEmpty << ", " << *array_size << ")";
+    out << "FparType("<< type<< ", " << *fpar_array << ")";
 
   }
 
@@ -1515,12 +1546,13 @@ class FparType : public Stmt {
   }
 
   bool isArray(){
-    return array_size->getSizes().size() != 0 || arrySizeEmpty;
+//    return fpar_array->getSizes().size() != 0 || fpar_array->farraySizeEmpty();
+    return !fpar_array->farraySizeEmpty(); // We want to know if we want to handle it as llvm pointer or array
   }
 
 
   std::vector<int> getArraySizes(){
-    return array_size->getSizes();
+    return fpar_array->getSizes();
   }
 
 
@@ -1528,7 +1560,7 @@ class FparType : public Stmt {
 
     DataType type;
     bool arrySizeEmpty;
-
+    FparArray *fpar_array;
     ArraySize *array_size;
 
 };
@@ -1687,7 +1719,7 @@ class FunctionHeader : public Stmt {
           node->llvm_type = getLlvmType(arg->type,node->array_size);
           node->assigned = true;//we do this since its arguments and the args are assigned
           node->isPointer = arg->ref;
-          node->isArgument = true;
+          node->isFirstArrayDimUnbounded = !arg->isArray; //
 
 
           argnodes.push_back(node);
