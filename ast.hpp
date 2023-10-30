@@ -220,6 +220,7 @@ class AST {
                            "chr", TheModule.get());
 
 
+    std::clog <<"About to start sem analysis" << std::endl;
       //do sem analysis
     sem();
 
@@ -606,9 +607,10 @@ class VarDec : public Stmt {
 
       for (auto id: id_list->getIds()) {
 
-
-          if (st.lookupNode(id->getName(), DECL_var) != nullptr) {
-              logError("Variable is already declared");
+          std::clog << "VarDec" << std::endl;
+          if (st.lookupNode(id->getName(), DECL_var)) {
+              //TODO: fix this! has issues with parent scope!
+              //logError("Variable is already declared");
           }
 
           //check that there isnt another node with same name,type
@@ -787,16 +789,23 @@ class Lvalue : public Expr {
 // IdLval for array is ArrayElem
 class IdLval : public Lvalue {
  public:
-  IdLval(std::string *c) : var(*c) {}
+  IdLval(std::string *c) : var(*c), semAnalysis(false) {}
   void printAST(std::ostream &out) const override {
     out << "IdLval(" << var << ")";
   }
 
   void sem() override{
-      //TODO: check offset too?
 
+      //TODO: check offset too?
+      std::clog << "Scope Name!: " <<st.getName() << std::endl;
+
+      std::clog << "Looking for id!: " << var << std::endl;
       // we dont want this to run in vardec
-      Node* idNode = st.lookupNode(var);
+
+
+      Node* idNode = st.lookupNode(var,DECL_var,true);
+      std::clog << "tt" << std::endl;
+
       if(idNode == nullptr)
           logError("Cant find id in sem");
       //TODO: we should do the below test only on access, check where getName is called?
@@ -807,15 +816,12 @@ class IdLval : public Lvalue {
         sem_type = idNode->type;
 
      std::clog << sem_type << std::endl;
+     std::clog << "sem" << std::endl;
      node = idNode;
         //TODO: does this work for pointer? do we need new types?
           //
 
-//          std::clog << st.currentScope()->name << std::endl;
-//          std::cerr << "Error: variable " << var << " not declared" << std::endl;
-//          exit(1);
-
-
+      semAnalysis = true;
   }
 
   std::string getName() override {
@@ -829,9 +835,11 @@ class IdLval : public Lvalue {
 
   //double check if we can do this better
   Value* compileAssign() override{
-    
-    Node* idNode = st.lookupNode(var);
-    if(idNode == nullptr){
+
+    std::clog <<"COmpileAssign" <<std::endl;
+    std::clog << "Sem analysis done : " << semAnalysis << std::endl;
+//    Node* idNode = st.lookupNode(var);
+    if(node == nullptr){
 
       logError("Variable: "+ var + " not declared");
 //      std::clog << st.currentScope()->name << std::endl;
@@ -839,9 +847,8 @@ class IdLval : public Lvalue {
 //      exit(1);
     }
 
-    Value * gvar = idNode->var;
+    Value * gvar = node->var;
 
-    node = idNode;
 
     return gvar;
     
@@ -862,11 +869,17 @@ class IdLval : public Lvalue {
 //      std::clog << "Error, tried to access a variable that isnt assigned" << std::endl;
 //      //exit(2);
 //    }
-
+      std::clog << "Here"<<std::endl;
+      std::clog << node->name << std::endl;
     if(!node->isPointer){
+        std::clog << "Here2"<<std::endl;
+
         return gvar;
     }else{
+        std::clog << "Here3 "<< var << std::endl;
+
         LoadInst* load = Builder.CreateLoad(node->llvm_type,gvar, var + "_load");
+        std::clog << "Here4"<<std::endl;
         load->setAlignment(Align(8));
         return load;
     }
@@ -907,6 +920,8 @@ class IdLval : public Lvalue {
   Node *node;
 
   std::string var;
+
+  bool semAnalysis;
 };
 
 
@@ -922,6 +937,8 @@ class ArrayElem : public Lvalue {
   void sem() override{
       //TODO: implement???
       var->sem();
+
+      expr->sem();
 
       std::clog << "Array elem "<< std::endl;
 
@@ -1102,6 +1119,8 @@ class Return : public Stmt {
   }
 
   void sem(){
+      expr->sem();
+
     //TODO: check that expr type matches function!
   }
 
@@ -1137,6 +1156,8 @@ class StmtList : public Stmt {
   //TODO: We need to check that the order of statements is correct! SUPER IMPORTANT!
 
   void sem() override{
+      std::clog << "STMT Scope Name!: " <<st.getName() << std::endl;
+
       for (Stmt *s : stmt_list) s->sem();
   }
 
@@ -1573,7 +1594,9 @@ class FparDef : public Stmt {
     delete ref; delete id_list; delete fpar_type;
   }
 
-
+  void sem() override {
+    id_list->sem();
+  }
   void printAST(std::ostream &out) const override {
     out << "FparDef("<< *ref <<  ", " << *id_list << ", " << *fpar_type << ")";
   }
@@ -1592,6 +1615,7 @@ class FparDef : public Stmt {
     std::vector<FuncArg *> args;
 
     for(Id *id : ids){
+
       FuncArg *arg = new FuncArg();
       arg->type = fpar_type->getType();
       arg->isArray = fpar_type->isArray();
@@ -1630,6 +1654,9 @@ class FparDefList : public Stmt {
   void add(FparDef *d) { fpardef_list.push_back(d); }
   void add_front(FparDef *d) { fpardef_list.push_front(d); }
 
+    void sem() override {
+        for (FparDef *d: fpardef_list) d->sem();
+    }
   void printAST(std::ostream &out) const override {
     out << "FparDefList(";
     bool first = true;
@@ -1685,7 +1712,7 @@ class FparDefList : public Stmt {
 
 class FunctionHeader : public Stmt {
  public:
-  FunctionHeader(std::string *s,FparDefList *f,DataType t) : Tid(*s),fpardef_list(f),type(t) {}
+  FunctionHeader(std::string *s,FparDefList *f,DataType t) : Tid(*s),fpardef_list(f),type(t),argTypes({}) {}
   ~FunctionHeader() {
     delete fpardef_list;
   }
@@ -1704,7 +1731,7 @@ class FunctionHeader : public Stmt {
 
       std::vector<FuncArg *> args = getArgs();
 
-      argTypes = {};
+//      argTypes = {};
 
       for(FuncArg *arg : args){
           //TODO: handle ref, pass as pointer
@@ -1716,21 +1743,23 @@ class FunctionHeader : public Stmt {
           node->type = arg->type;
           std::clog << "New node! :" << arg->name << " is Array: " << arg->isArray   << std::endl;
           node->array_size = arg->array_size;
-          node->llvm_type = getLlvmType(arg->type,node->array_size);
           node->assigned = true;//we do this since its arguments and the args are assigned
           node->isPointer = arg->ref;
           node->isFirstArrayDimUnbounded = !arg->isArray; //
+          node->isSet = false;
 
+
+          node->argTypes = argTypes;
 
           argnodes.push_back(node);
           std::clog << "Arg node: " << node->name << "is ref: "<<arg->ref <<  "is array: " <<arg->isArray << std::endl;
-          if(arg->ref){
-              argTypes.push_back(PointerType::get(node->llvm_type, 0));
-//              node->llvm_type = PointerType::get(node->llvm_type, 0);
-
-          }else{
-              argTypes.push_back(node->llvm_type);
-          }
+//          if(arg->ref){
+//              argTypes.push_back(PointerType::get(node->llvm_type, 0));
+////              node->llvm_type = PointerType::get(node->llvm_type, 0);
+//
+//          }else{
+//              argTypes.push_back(node->llvm_type);
+//          }
 
 
       }
@@ -1742,7 +1771,7 @@ class FunctionHeader : public Stmt {
       functionNode->isCompiled = false;
       std::clog << "Function Node set" << std::endl;
       //functionNode->function = F;
-      //functionNode->funcargs = getArgs(); we do this on compile
+      functionNode->argnodes = &argnodes; //we do this on compile
       //functionNode->block = BB;
 
       fnode = functionNode;
@@ -1751,9 +1780,10 @@ class FunctionHeader : public Stmt {
 
 
 
-      st.createScope(Tid); //add the name in scope
+      st.createScope(Tid,fnode); //add the name in scope
 
 
+      fpardef_list->sem();
 
       //adding arguments in the st
       for(Node *node : argnodes){
@@ -1767,55 +1797,29 @@ class FunctionHeader : public Stmt {
 
   Value* compile() override{
       std::clog << "FunctionHeader compile: " << std::endl;
-//      //fpardef_list->compileVector();
-//
-//
-//    // Make the function type:  double(double,double) etc.
-//
-//    DataType dtype = getReturnType();
-//
-//
-//    Type *type = getLlvmType(dtype);
-//
-//
-//    //args
-//
-//    std::vector<Node*> argnodes;
-//
-//    std::vector<FuncArg *> args = getArgs();
-//    std::vector<Type*> argTypes = {};
-//    for(FuncArg *arg : args){
-//      //TODO: handle ref, pass as pointer
-//
-//
-//      Node *node = new Node();
-//      node->name = arg->name;
-//      node->decl_type = DECL_var;
-//      node->type = arg->type;
-//      std::clog << "New node! :" << arg->name << " is Array: " << arg->isArray   << std::endl;
-//      node->llvm_type = getLlvmType(arg->type,arg->isArray);
-//      node->assigned = true;//we do this since its arguments and the args are assigned
-//      node->isPointer = arg->ref;
-//
-//
-//
-//      argnodes.push_back(node);
-//      std::clog << "Arg node: " << node->name << "is ref: "<<arg->ref <<  "is array: " <<arg->isArray << std::endl;
-//      if(arg->ref){
-//        argTypes.push_back(PointerType::get(node->llvm_type, 0));
-//      }else{
-//        argTypes.push_back(node->llvm_type);
-//      }
-//
-//
-//    }
 
-//    Node *funNode = st.lookupNode(Tid,DECL_func);
+
 
     DataType dtype = getReturnType();
 
 
     Type *type = getLlvmType(dtype); // function cant return array?
+
+
+
+      std::clog << "Adding arg nodes! " << std::endl;
+      std::clog << argnodes.size() << std::endl;
+      for(Node *node : argnodes){
+          node->llvm_type = getLlvmType(node->type,node->array_size);
+
+          if(node->isPointer){
+              argTypes.push_back(PointerType::get(node->llvm_type, 0));
+          }else{
+              argTypes.push_back(node->llvm_type);
+          }
+
+
+      }
 
     FunctionType *FT = FunctionType::get(type,argTypes,false);
 
@@ -1851,22 +1855,25 @@ class FunctionHeader : public Stmt {
     for (auto &Arg : F->args()) {
       Arg.setName(argnodes[Idx]->name+"_funcarg");
 
-      if(argnodes[Idx]->isPointer){
-        argnodes[Idx]->var = &Arg;
+      if(!argnodes[Idx]->isSet) {
+
+          if (argnodes[Idx]->isPointer) {
+              argnodes[Idx]->var = &Arg;
+          } else {
+              //null ptr needs to be arraySize if exists!
+              AllocaInst *Alloca = Builder.CreateAlloca(argnodes[Idx]->llvm_type, nullptr,
+                                                        argnodes[Idx]->name + "_funcarg");
+              //AllocaInst *Alloca = CreateEntryBlockAlloca(F, argnodes[Idx]->name, argnodes[Idx]->llvm_type);
+              StoreInst *store = Builder.CreateStore(&Arg, Alloca);
+
+              store->setAlignment(Align(8));
+              argnodes[Idx]->isSet = true;
+              argnodes[Idx]->var = Alloca;
+              argnodes[Idx]->isPointer = true;
+          }
       }
-      else{
-        //null ptr needs to be arraySize if exists!
-        AllocaInst* Alloca = Builder.CreateAlloca(argnodes[Idx]->llvm_type, nullptr, argnodes[Idx]->name+"_funcarg");
-        //AllocaInst *Alloca = CreateEntryBlockAlloca(F, argnodes[Idx]->name, argnodes[Idx]->llvm_type);
-        StoreInst* store = Builder.CreateStore(&Arg, Alloca);
-
-        store->setAlignment(Align(8));
-
-        argnodes[Idx]->var = Alloca;
-        argnodes[Idx]->isPointer = true;
-      }
-
       Idx++;
+
     }
 
     Builder.SetInsertPoint(previousBB);
@@ -1874,28 +1881,6 @@ class FunctionHeader : public Stmt {
 
     std::clog << "Gereee" << std::endl;
 
-
-
-
-
-
-
-    //We do all the below in sem
-//    st.insertNode(functionNode,DECL_func);
-//
-//
-//    st.createScope(Tid); //add the name in scope
-
-
-
-//    //adding arguments in the st
-//    for(Node *node : argnodes){
-//      st.insertNode(node,DECL_var);
-//    }
-//
-//    st.exitScope();
-
-    // std::clog << "Current Scope: " <<  st.currentScope()->name << std::endl;
 
 
 
@@ -1993,21 +1978,19 @@ class FunctionDef : public Stmt {
 
       //its possible that only header has been declared before
       Node *node = st.lookupNode(funcName,DECL_func);//TODO: maybe do polymorphism?
-      if(node == nullptr){
+      if(node == nullptr)
           header->sem();
-//          F = header->getFunction();
-//          BB = header->fnode->block;
-      }
-//      else{
-////          std::clog << "Function: " << funcName << " already declared!" << std::endl;
-////          //if declared
-////          F = node->function;
-////          BB = node->block;
-//      }
+
+      std::clog << "Scope Name!: " <<st.getName() << std::endl;
 
       st.enterScope(funcName);
+      std::clog << "Scope Name!: " <<st.getName() << std::endl;
+
+
 
       localdef_list->sem();
+      std::clog << "STMTLIST makeScope Name!: " <<st.getName() << std::endl;
+
       stmt_list->sem();
 
       st.exitScope(); //remove the name from scope
@@ -2114,7 +2097,7 @@ class FunctionDef : public Stmt {
 class BinOpCond : public Cond {
     //also take care of conds 
  public:
-  BinOpCond(Expr *e1, std::string *s, Expr *e2) : expr1(e1), op(*s), expr2(e2) {}//binOpCond belong to parent
+  BinOpCond(Cond *e1, std::string *s, Cond *e2) : expr1(e1), op(*s), expr2(e2) {}//binOpCond belong to parent
   ~BinOpCond() { delete expr1; delete expr2; }
   void printAST(std::ostream &out) const override {
     out << "BinOpCond("<< op<< ", " << *expr1 << ", " << *expr2 << ")";
@@ -2134,12 +2117,13 @@ class BinOpCond : public Cond {
   Value *compile(BasicBlock *thenBB, BasicBlock *afterBB) override{
 
 
-    std::clog << "Compiling binopcond "<< std::endl;
+    std::clog << "Compiling binopcond "<< op << std::endl;
 
     Function *TheFunction = Builder.GetInsertBlock()->getParent();
 
-
-    Value *leftValue = expr1->compile();
+    std::clog << "Compiling left"<< std::endl;
+    Value *leftValue = expr1->compile(thenBB,afterBB);
+    std::clog << "Compiled left" <<std::endl;
     BasicBlock *evalRightBB = BasicBlock::Create(TheContext, "evalRight", TheFunction);
 
     if(op == "and"){
@@ -2153,13 +2137,13 @@ class BinOpCond : public Cond {
     }
       Builder.SetInsertPoint(evalRightBB);
 
-      return expr2->compile();  // evaluate right expression
+      return expr2->compile(thenBB,afterBB);  // evaluate right expression
 
   }
  private:
-  Expr *expr1;
+  Cond *expr1;
   std::string op;
-  Expr *expr2;
+  Cond *expr2;
 };
 
 
@@ -2274,6 +2258,7 @@ class ExprList : public Expr {
   void add_front(Expr *d) { expr_list.push_front(d); }
 
   void sem() override{
+      std::clog << "Calling ExprList sem" <<std::endl;
       for (const auto &d : expr_list )
           d->sem();
   }
@@ -2332,20 +2317,24 @@ class FuncCall : public Stmt, public Expr {
   void sem() override{
       //TODO: implement this, we need to check that the arguments of the function have the correct types
       //also add return type to type
+
+      expr_list->sem();
+
+
       Node* functionNode = st.lookupNode(id, DECL_func);
 
 
       if(functionNode == nullptr && LIBRARY_FUNCTIONS.find(id) == LIBRARY_FUNCTIONS.end())// if the function is not in Symbol Table or LIBRARY
             logError("Function named: " + id + " hasnt been declared");
 
-      //TODO: fix this
-      if(id == "chr"){
-          sem_type = TYPE_char;
-      }
-      else
-        sem_type = TYPE_int; //TODO: fix this and return based on func
+      //TODO: fix this funccall
+//      if(id == "chr"){
+//          sem_type = TYPE_char;
+//      }
+//      else
+//        sem_type = TYPE_int; //TODO: fix this and return based on func
 
-
+        sem_type = functionNode->type;
   }
   Value* compile() override{
     std::clog << "Compiling function call: " << id << std::endl;
@@ -2389,6 +2378,16 @@ class FuncCall : public Stmt, public Expr {
         i++;
 
       }
+
+
+      //Here we pass extra args related to nesting
+
+        for(auto &n : functionNode->extraArgNodes) {
+
+            args.push_back(n->realNode->var);
+        }
+
+
     }
 
 
