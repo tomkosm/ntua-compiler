@@ -96,8 +96,7 @@ class AST {
     if(array_size.size() > 0){
         std::reverse(array_size.begin(), array_size.end());
         ArrayType* ArrayTy;
-      //TODO: handle multi dim?
-      //check order
+
         for(auto size : array_size) {
             ArrayTy = ArrayType::get(itype, size);
             itype = ArrayTy;
@@ -108,13 +107,7 @@ class AST {
     return itype;
   }
 
-//  Initializer * getLlvmTypeInitializer (DataType dtype,std::vector<int> array_size={}) {
-//    //TODO: implement
-//
-//  }
-
-
-      void llvm_compile_and_dump(bool optimize=false) {
+  void llvm_compile_and_dump(bool optimize=false) {
 
       std::clog << "Optimizations: " << optimize << std::endl;
 
@@ -201,6 +194,7 @@ class AST {
             }
         }
     }
+
 //TODO: we probably need this!, figure out if better way? we cant just delete cause of dependencies, see
     for (BasicBlock* BB : EmptyBBs) {
 //        BB->eraseFromParent();
@@ -340,6 +334,17 @@ class Expr : virtual public AST {
     DataType sem_type;
     virtual Value* compileAssign() { std::clog << "Called Lvalue compileAssign!" << std::endl; return nullptr; }
     virtual std::vector<int> getArraySize() { std::clog << "Called default Lvalue getArraySize!" << std::endl; exit(2);}
+
+    virtual bool isEmpty() const {
+        //we check if its Expr base class. If s then its empty
+        return typeid(*this) == typeid(Expr);
+    }
+
+    void sem(){
+        std::clog << "Empty sem" << std::endl;
+        sem_type = TYPE_nothing;
+    }
+
     void check_type(DataType t){
         //TODO: needs to also check array/array size
         sem();
@@ -373,16 +378,7 @@ class Id : public Expr {
   void printAST(std::ostream &out) const override {
     out << "Id(" << var << ")";
   }
-  //this class just gives name to VarDec
-//  void sem() override{
-      //This is implemented higher up, this is never called!
-      //TODO: to implement this we need to add in st!
 
-//      Node *node = new Node;
-//
-//
-//      st.insertNode();
-//  }
   std::string getName() const { return var; }
 
 
@@ -478,7 +474,12 @@ class ArraySize : public Stmt {
   void add_front(int s) {array_list.push_front(s);}
 
   void sem() override {
-    //TODO: figure out what testing we need
+      for( int s:array_list){
+          if(s <= 0){
+              logError("Array size needs to be positive!");
+          }
+      }
+    //TODO: figure out what we need
   }
 
   void printAST(std::ostream &out) const override {
@@ -512,6 +513,11 @@ class TypeDef : public Stmt {
 
   void sem() override{
       //TODO:fill
+      if(type == TYPE_UNDEFINED_ERROR){
+          logError("Unexpected type error");
+      }
+
+      array_size->sem();
   }
 
   void printAST(std::ostream &out) const override {
@@ -545,6 +551,7 @@ class VarDec : public Stmt {
   void sem() override {
       //create the st entry
 
+
       for (auto id: id_list->getIds()) {
 
           std::clog << "VarDec" << std::endl;
@@ -568,7 +575,12 @@ class VarDec : public Stmt {
           idNode->isFirstArrayDimUnbounded = false;
 
           st.insertNode(idNode);
+
+
       }
+
+      type->sem();
+
   }
 
   std::vector<Id *> getIds() const { return id_list->getIds(); }
@@ -934,11 +946,13 @@ class ArrayElem : public Lvalue {
       std::clog << typeStr << std::endl;
 //      logError(" ");
 
-    //if its an array first index needs to be c64(0)
+
+    //if its an array first index needs to be c64(0). Does it?
     if (isa<ArrayType>(array->llvm_type)) {
-      arrayIndex.insert(arrayIndex.begin(), c64(0));
+      //arrayIndex.insert(arrayIndex.begin(), c64(0));
     }
 
+    std::clog << "Making gep, line:  " << line << std::endl;
     return Builder.CreateInBoundsGEP(array->llvm_type,array->var,arrayIndex,var->getName()+"_arrayElem_arg");
 
 
@@ -1064,6 +1078,7 @@ class Return : public Stmt {
   }
 
   void sem(){
+      std::clog << "Return sem" << std::endl;
       expr->sem();
 
     //TODO: check that expr type matches function!
@@ -1075,12 +1090,14 @@ class Return : public Stmt {
   }
   Value *compile() override{
     std::clog << "Compiling return! " << std::endl;
-    Value * compiledExpr = expr->compile();
+    std::clog << *expr << std::endl;
 
-    if (compiledExpr == nullptr){
-      return Builder.CreateRetVoid();
+    if (expr->isEmpty()){
+        return Builder.CreateRetVoid();
     }else{
-      return Builder.CreateRet(compiledExpr);
+
+        Value * compiledExpr = expr->compile();
+        return Builder.CreateRet(compiledExpr);
     }
 
   }
@@ -2205,6 +2222,7 @@ class ExprList : public Expr {
   void add(Expr *d) { expr_list.push_back(d); }
   void add_front(Expr *d) { expr_list.push_front(d); }
 
+
   void sem() override{
       std::clog << "Calling ExprList sem" <<std::endl;
       for (const auto &d : expr_list )
@@ -2271,7 +2289,7 @@ class FuncCall : public Stmt, public Expr {
 
       Node* functionNode = st.lookupNode(id, DECL_func);
 
-        std::clog << "Func sem analysis" << std::endl;
+      std::clog << "Func sem analysis" << std::endl;
       if(functionNode == nullptr)// if the function is not in Symbol Table or LIBRARY
       {
           if (externalFuncMap.find(id) == externalFuncMap.end()) {
