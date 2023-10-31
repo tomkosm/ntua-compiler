@@ -46,8 +46,15 @@ enum DataType
 
 //needs to be able to see DataType
 #include "symbol.cpp"
-
-
+struct FunctionDetails {
+    std::string functionName;
+    Type *returnLLVMType;
+    std::vector<Type *> argTypes;
+    bool argPointer;
+    DataType returnType;
+    Function::LinkageTypes linkage = Function::ExternalLinkage;  // Set default linkage here
+    Function *func = nullptr;  // Pointer to the created function
+};
 
 
 class AST {
@@ -63,7 +70,16 @@ class AST {
 
   std::string getName(){}
 
-  Type* getLlvmType(DataType dtype,std::vector<int> array_size={}){
+
+
+
+    Function* createFunction(const FunctionDetails &details, LLVMContext &context, const std::unique_ptr<Module>& module) {
+        FunctionType *funcType = FunctionType::get(details.returnLLVMType, details.argTypes, false);
+        return Function::Create(funcType, details.linkage, details.functionName, module.get());
+    }
+
+
+    Type* getLlvmType(DataType dtype,std::vector<int> array_size={}){
 
     Type *itype;
 
@@ -89,37 +105,6 @@ class AST {
         std::clog << "Hereeee!!!!!!!" << std::endl;
 
     }
-
-
-
-//      std::reverse(arraysizes.begin(), arraysizes.end());
-
-
-
-//      std::clog << "Array size: " << arraysizes[0] << " " << arraysizes[1] << std::endl;
-      //wrong need to handle multi dim
-
-//      //Type *ltype = itype;
-//      Initializer = c64(0);
-//
-//      ArrayType* ArrayTy;
-//
-//      std::vector<llvm::Constant*> arrayElems;
-//      for(auto size : arraysizes) {
-//
-//          std::clog << "Itype size: " << size << std::endl;
-//          ArrayTy = ArrayType::get(itype, size);
-//          std::clog << "hereee" << std::endl;
-//
-//          itype = ArrayTy;
-//
-//          arrayElems = {static_cast<unsigned long>(size),Initializer};
-//
-//          Initializer = ConstantArray::get(ArrayTy,arrayElems);
-//
-//
-//      }
-
     return itype;
   }
 
@@ -149,77 +134,41 @@ class AST {
     i8 = IntegerType::get(TheContext, 8);
     i32 = IntegerType::get(TheContext, 32);
     i64 = IntegerType::get(TheContext, 64);
- 
+
+    void_type = Type::getVoidTy(TheContext);
+
+    i8_ptr = PointerType::get(i8, 0);
+//          struct FunctionDetails {
+//              std::string functionName;
+//              Type *returnType;
+//              std::vector<Type *> argTypes;
+//              Function::LinkageTypes linkage = Function::ExternalLinkage;  // Set default linkage here
+//          };
+
+    externalFuncMap = {
+          {"writeInteger", {"writeInteger", void_type, {i64},false,TYPE_nothing}},
+          {"writeChar", {"writeChar", void_type, {i8},false,TYPE_nothing}},
+          {"writeString", {"writeString", void_type, {i8_ptr},true,TYPE_nothing}},
+          {"readInteger", {"readInteger", i64, {},false,TYPE_int}},
+          {"readChar", {"readChar", i8, {},false,TYPE_int}},
+          {"readString", {"readString", void_type, {i64,i8_ptr},true,TYPE_int}}, //TODO: fix, mix of pointer and non pointer arg
+          {"ascii", {"ascii", i64, {i8},false,TYPE_nothing}},
+          {"chr", {"chr", i8, {i64},false,TYPE_char}},
+          {"strlen", {"strlen", i64, {i8_ptr},false,TYPE_int}},
+          {"strcmp", {"strcmp", void_type, {i8_ptr, i8_ptr},true,TYPE_nothing}},
+          {"strcpy", {"strcpy", void_type, {i8_ptr, i8_ptr},true,TYPE_nothing}},
+          {"strcat", {"strcat", void_type, {i8_ptr, i8_ptr},true,TYPE_nothing}},
+
+    };
+
+    // Create functions and store them in the map
+    for (auto &entry : externalFuncMap) {
+        //second is the value
+      entry.second.func = createFunction(entry.second, TheContext, TheModule);
+    }
 
 
-    // Initialize library functions
-    FunctionType *writeInteger_type =
-      FunctionType::get(Type::getVoidTy(TheContext), {i64}, false);
-    TheWriteInteger =
-      Function::Create(writeInteger_type, Function::ExternalLinkage,
-                       "writeInteger", TheModule.get());
-
-
-    FunctionType *writeChar_type =
-      FunctionType::get(Type::getVoidTy(TheContext), {i8}, false);
-    TheWriteChar =
-      Function::Create(writeChar_type, Function::ExternalLinkage,
-                       "writeChar", TheModule.get());
-
-
-
-
-    FunctionType *writeString_type =
-      FunctionType::get(Type::getVoidTy(TheContext),
-                        {PointerType::get(i8, 0)}, false);
-    TheWriteString =
-      Function::Create(writeString_type, Function::ExternalLinkage,
-                       "writeString", TheModule.get());
-
-
-
-    FunctionType *readInteger_type =
-      FunctionType::get(i64, {}, false);
-
-    TheReadInteger =
-      Function::Create(readInteger_type, Function::ExternalLinkage,
-                       "readInteger", TheModule.get());
-
-
-
-    FunctionType *strlen_type =
-      FunctionType::get(i64, {PointerType::get(i8, 0)}, false);
-
-    Thestrlen =
-      Function::Create(strlen_type, Function::ExternalLinkage,
-                       "strlen", TheModule.get());
-
-
-    FunctionType *strcpy_type =
-      FunctionType::get(Type::getVoidTy(TheContext), {PointerType::get(i8, 0),PointerType::get(i8, 0)}, false);
-
-    Thestrcpy =
-      Function::Create(strcpy_type, Function::ExternalLinkage,
-                       "strcpy", TheModule.get());
-
-    FunctionType *ascii_type =
-          FunctionType::get(i64, {i8}, false);
-
-
-    Theascii =
-      Function::Create(ascii_type, Function::ExternalLinkage,
-                       "ascii", TheModule.get());
-
-
-    FunctionType *chr_type =
-          FunctionType::get(i8, {i64}, false);
-
-
-    Thechr =
-          Function::Create(chr_type, Function::ExternalLinkage,
-                           "chr", TheModule.get());
-
-
+    std::clog << "externalFuncMap size:" << externalFuncMap.size() << std::endl;
     std::clog <<"About to start sem analysis" << std::endl;
       //do sem analysis
     sem();
@@ -314,7 +263,7 @@ class AST {
  public:
   static SymbolTable st; //maybe some special class to do this?
 
-
+  static std::map<std::string, FunctionDetails> externalFuncMap;
 
  protected:
   int line;
@@ -342,10 +291,12 @@ class AST {
 
     static Function *Thechr;
 
-
     static Type *i8;
   static Type *i32;
   static Type *i64;
+
+  static Type *i8_ptr;
+    static Type *void_type;
 
   static ConstantInt* c8(char c) {
     return ConstantInt::get(TheContext, APInt(8, c, true));
@@ -360,17 +311,6 @@ class AST {
       yyerror(msg.c_str(),line);
   }
 
-  //not sure if we can put that somewhere else?
-    std::map<std::string, int> LIBRARY_FUNCTIONS = {
-            {"writeInteger", 1},
-            {"writeString", 1},
-            {"strlen",1},
-            {"readInteger",1},
-            {"writeChar",1},
-            {"ascii",1},
-            {"strcpy",1},
-            {"chr",1}
-    };
 
 
 };
@@ -2324,8 +2264,19 @@ class FuncCall : public Stmt, public Expr {
       Node* functionNode = st.lookupNode(id, DECL_func);
 
 
-      if(functionNode == nullptr && LIBRARY_FUNCTIONS.find(id) == LIBRARY_FUNCTIONS.end())// if the function is not in Symbol Table or LIBRARY
-            logError("Function named: " + id + " hasnt been declared");
+      if(functionNode == nullptr)// if the function is not in Symbol Table or LIBRARY
+
+          if(externalFuncMap.find(id) == externalFuncMap.end()){
+              logError("Function named: " + id + " hasnt been declared");
+          }
+          else{
+              auto funcDetails = externalFuncMap.find(id);
+              FunctionDetails function = funcDetails->second;
+              sem_type = function.returnType;
+          }
+      else{
+          sem_type = functionNode->type;
+      }
 
       //TODO: fix this funccall
 //      if(id == "chr"){
@@ -2334,7 +2285,6 @@ class FuncCall : public Stmt, public Expr {
 //      else
 //        sem_type = TYPE_int; //TODO: fix this and return based on func
 
-        sem_type = functionNode->type;
   }
   Value* compile() override{
     std::clog << "Compiling function call: " << id << std::endl;
@@ -2401,75 +2351,23 @@ class FuncCall : public Stmt, public Expr {
     Function *func;
 
     if (functionNode == nullptr) {
-        if(id == "writeInteger"){
-          args = expr_list->compileVector();
 
-          //cast vector Value to 64 bit
-          // std::vector<Value*> args64;
-          // for(auto &a : args) {
-          //     args64.push_back(Builder.CreateSExt(a, i64, "cast"));
-          // }
-          //args = args64;
+        auto fun = externalFuncMap.find(id);
 
-          func = TheWriteInteger;
+        if(fun == externalFuncMap.end()){
+            logError("Cant find externalFunc");
         }
-        else if(id == "writeChar"){
-          args = expr_list->compileVector();
+        FunctionDetails function = fun->second;
 
-          func = TheWriteChar;
-
+        if(function.argPointer){
+            args = expr_list->compileAssignVector();
         }
-        else if(id == "writeString"){
-          //args = {expr_list[0].compileAssign()};
-          args = expr_list->compileAssignVector();
-
-
-          std::clog << "Writing string" << std::endl;
-          
-          //std::vector<Value*> argPointer = {Builder.CreateGEP(args[0]->getType(),args[0], {c32(0), c32(0)}, "nl")};
-                    std::clog << "Writing string2" << std::endl;
-
-
-          //args = argPointer;
-
-          func = TheWriteString;
-
-        }
-        else if(id == "readInteger"){
-          args = expr_list->compileVector();
-
-          func = TheReadInteger;
-        }
-        else if(id == "strlen"){
-          args = expr_list->compileAssignVector();
-
-          func = Thestrlen;
-
-        }
-        else if(id == "strcpy"){
-          args = expr_list->compileAssignVector();
-
-          func = Thestrcpy;
-
-        }
-        else if(id == "ascii"){
-
+        else{
             args = expr_list->compileVector();
-
-            func = Theascii;
-
         }
-        else if(id == "chr"){
 
-            args = expr_list->compileVector();
+        func = function.func;
 
-            func = Thechr;
-
-        }
-          else{
-          std::cerr << "Function " << id << " not declared" << std::endl;
-          exit(1);
-        }
     }else{
         func = functionNode->function;
     }
