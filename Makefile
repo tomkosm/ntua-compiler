@@ -14,7 +14,7 @@ lexer.cpp: lexer.l
 lexer.o: lexer.cpp lexer.hpp parser.hpp ast.hpp
 	$(CXX) $(CXXFLAGS) -c -o lexer.o lexer.cpp 
 
-ast.o: ast.cpp ast.hpp scope.cpp symbol.cpp
+ast.o: ast.cpp ast.hpp symbol.cpp
 	$(CXX) $(CXXFLAGS) -c -o ast.o ast.cpp
 
 parser.hpp parser.cpp: parser.y
