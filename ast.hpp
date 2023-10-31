@@ -150,11 +150,11 @@ class AST {
           {"writeChar", {"writeChar", void_type, {i8},false,TYPE_nothing}},
           {"writeString", {"writeString", void_type, {i8_ptr},true,TYPE_nothing}},
           {"readInteger", {"readInteger", i64, {},false,TYPE_int}},
-          {"readChar", {"readChar", i8, {},false,TYPE_int}},
-          {"readString", {"readString", void_type, {i64,i8_ptr},true,TYPE_int}}, //TODO: fix, mix of pointer and non pointer arg
-          {"ascii", {"ascii", i64, {i8},false,TYPE_nothing}},
+          {"readChar", {"readChar", i8, {},false,TYPE_char}},
+          {"readString", {"readString", void_type, {i64,i8_ptr},true,TYPE_nothing}}, //TODO: fix, mix of pointer and non pointer arg
+          {"ascii", {"ascii", i64, {i8},false,TYPE_int}},
           {"chr", {"chr", i8, {i64},false,TYPE_char}},
-          {"strlen", {"strlen", i64, {i8_ptr},false,TYPE_int}},
+          {"strlen", {"strlen", i64, {i8_ptr},true,TYPE_int}},
           {"strcmp", {"strcmp", void_type, {i8_ptr, i8_ptr},true,TYPE_nothing}},
           {"strcpy", {"strcpy", void_type, {i8_ptr, i8_ptr},true,TYPE_nothing}},
           {"strcat", {"strcat", void_type, {i8_ptr, i8_ptr},true,TYPE_nothing}},
@@ -828,7 +828,7 @@ class IdLval : public Lvalue {
   }
 
   std::vector<Value *> getIndexes() override{
-    std::vector<Value *> v = {}; //This is needed , its the base pointer for an array!
+    std::vector<Value *> v = {}; //This is needed , its the base pointer for an array! , I think i added this smwhere else
     return v;
   }
 
@@ -910,14 +910,6 @@ class ArrayElem : public Lvalue {
 
     std::vector<Value*> arrayIndex = getIndexes();
 
-    //insert c64(0) as first element
-    //on arrays first indice is 0
-    //on pointers its not
-    //arguments are pointers ? always?//TODO: explain this way better
-    if(!array->isFirstArrayDimUnbounded)
-        arrayIndex.insert(arrayIndex.begin(), c64(0));
-
-//    std::clog << arrayIndex[0]->getName() << std::endl;
 
 
 
@@ -934,7 +926,20 @@ class ArrayElem : public Lvalue {
         std::clog << arrayIndex.size() << std::endl;
         std::clog <<"here" << std::endl;
         std::clog << line << std::endl;
-        return Builder.CreateInBoundsGEP(array->llvm_type,array->var,arrayIndex,var->getName()+"_arrayElem_arg");
+
+      std::string typeStr;
+      llvm::raw_string_ostream rso(typeStr);
+      array->llvm_type->print(rso);
+
+      std::clog << typeStr << std::endl;
+//      logError(" ");
+
+    //if its an array first index needs to be c64(0)
+    if (isa<ArrayType>(array->llvm_type)) {
+      arrayIndex.insert(arrayIndex.begin(), c64(0));
+    }
+
+    return Builder.CreateInBoundsGEP(array->llvm_type,array->var,arrayIndex,var->getName()+"_arrayElem_arg");
 
 
   }
@@ -1709,6 +1714,8 @@ class FunctionHeader : public Stmt {
       functionNode->name = Tid;
       functionNode->decl_type = DECL_func;
       functionNode->isCompiled = false;
+      functionNode->type = getReturnType();
+
       std::clog << "Function Node set" << std::endl;
       //functionNode->function = F;
       functionNode->argnodes = &argnodes; //we do this on compile
@@ -2103,6 +2110,7 @@ class CompareOp : public Cond {
       expr2->sem();
       std::clog << "Sem CompareOp" << std::endl;
       //should have .type
+//      std::clog << "Type 1:" << expr1->sem_type << " Type 2: " << expr2->sem_type << std::endl;
       if(expr1->sem_type != expr2->sem_type)
           logError("Compare types dont match");
 
@@ -2263,18 +2271,20 @@ class FuncCall : public Stmt, public Expr {
 
       Node* functionNode = st.lookupNode(id, DECL_func);
 
-
+        std::clog << "Func sem analysis" << std::endl;
       if(functionNode == nullptr)// if the function is not in Symbol Table or LIBRARY
-
-          if(externalFuncMap.find(id) == externalFuncMap.end()){
+      {
+          if (externalFuncMap.find(id) == externalFuncMap.end()) {
               logError("Function named: " + id + " hasnt been declared");
-          }
-          else{
+          } else {
               auto funcDetails = externalFuncMap.find(id);
               FunctionDetails function = funcDetails->second;
               sem_type = function.returnType;
           }
+      }
       else{
+          std::clog << "func type" << std::endl;
+          std::clog <<functionNode->type << std::endl;
           sem_type = functionNode->type;
       }
 

@@ -195,7 +195,11 @@ class SymbolTable{
                         arg->type = n->type;
                         arg->ref = true;
 
+
+
                         n->realNode = node;
+
+                        n->isFirstArrayDimUnbounded = node->isFirstArrayDimUnbounded;
 
                         n->scope->functionOwner->extraArgNodes.push_back(n);
 
