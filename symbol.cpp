@@ -179,12 +179,15 @@ class SymbolTable{
                     std::clog << "ParentScopeFl" << std::endl;
 
                     std::clog << "size " << temp_argnodes.size() << std::endl;
+
+                    std::reverse(temp_argnodes.begin(), temp_argnodes.end());
+                    lastNode = node;
                     for(Node *n : temp_argnodes){
 
                         n->llvm_type = node->llvm_type;
 
                         n->type = node->type;
-
+                        n->array_size = node->array_size;
                         std::clog << "ARGGGGG "<< n->type << std::endl;
 
 
@@ -195,8 +198,8 @@ class SymbolTable{
                         arg->ref = true;
 
 
+                        n->realNode = lastNode;
 
-                        n->realNode = node;
 
                         n->isFirstArrayDimUnbounded = node->isFirstArrayDimUnbounded;
 
@@ -213,6 +216,7 @@ class SymbolTable{
                         lastNode = n;
 
                     }
+//                    lastNode = temp_argnodes[0];
                     lastNode->type = node->type;
 
                     std::clog << "TEST "<< lastNode->type << " " << node->type <<  std::endl;
@@ -235,7 +239,7 @@ class SymbolTable{
                 Node *arg = new Node();
 //                arg->type = TYPE_int; //we should keep a pointer or smth?
 //                arg->isArray = false;
-                arg->array_size = {};
+//                arg->array_size = {};
                 arg->name = node_name;
 
                 arg->isPointer = true;

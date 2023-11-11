@@ -50,8 +50,9 @@ struct FunctionDetails {
     std::string functionName;
     Type *returnLLVMType;
     std::vector<Type *> argTypes;
-    bool argPointer;
+//    bool argPointer;
     DataType returnType;
+    std::vector<bool> argsPointer;
     Function::LinkageTypes linkage = Function::ExternalLinkage;  // Set default linkage here
     Function *func = nullptr;  // Pointer to the created function
 };
@@ -139,18 +140,18 @@ class AST {
 //          };
 
     externalFuncMap = {
-          {"writeInteger", {"writeInteger", void_type, {i64},false,TYPE_nothing}},
-          {"writeChar", {"writeChar", void_type, {i8},false,TYPE_nothing}},
-          {"writeString", {"writeString", void_type, {i8_ptr},true,TYPE_nothing}},
-          {"readInteger", {"readInteger", i64, {},false,TYPE_int}},
-          {"readChar", {"readChar", i8, {},false,TYPE_char}},
-          {"readString", {"readString", void_type, {i64,i8_ptr},true,TYPE_nothing}}, //TODO: fix, mix of pointer and non pointer arg
-          {"ascii", {"ascii", i64, {i8},false,TYPE_int}},
-          {"chr", {"chr", i8, {i64},false,TYPE_char}},
-          {"strlen", {"strlen", i64, {i8_ptr},true,TYPE_int}},
-          {"strcmp", {"strcmp", void_type, {i8_ptr, i8_ptr},true,TYPE_nothing}},
-          {"strcpy", {"strcpy", void_type, {i8_ptr, i8_ptr},true,TYPE_nothing}},
-          {"strcat", {"strcat", void_type, {i8_ptr, i8_ptr},true,TYPE_nothing}},
+          {"writeInteger", {"writeInteger", void_type, {i64},TYPE_nothing,{false}}},
+          {"writeChar", {"writeChar", void_type, {i8},TYPE_nothing,{false}}},
+          {"writeString", {"writeString", void_type, {i8_ptr},TYPE_nothing,{true}}},
+          {"readInteger", {"readInteger", i64, {},TYPE_int,{}}},
+          {"readChar", {"readChar", i8, {},TYPE_char,{}}},
+          {"readString", {"readString", void_type, {i64,i8_ptr},TYPE_nothing,{false,true}}}, //TODO: fix, mix of pointer and non pointer arg
+          {"ascii", {"ascii", i64, {i8},TYPE_int,{false}}},
+          {"chr", {"chr", i8, {i64},TYPE_char,{false}}},
+          {"strlen", {"strlen", i64, {i8_ptr},TYPE_int,{true}}},
+          {"strcmp", {"strcmp", void_type, {i8_ptr, i8_ptr},TYPE_nothing,{true,true}}},
+          {"strcpy", {"strcpy", void_type, {i8_ptr, i8_ptr},TYPE_nothing,{true,true}}},
+          {"strcat", {"strcat", void_type, {i8_ptr, i8_ptr},TYPE_nothing,{true,true}}},
 
     };
 
@@ -931,6 +932,7 @@ class ArrayElem : public Lvalue {
 
     std::clog << "before gep!!!!!!!!!!!!!!!! " << var->getName() << std::endl;
 
+    std::clog << "Array size: " << array->array_size.size() << std::endl;
 
 
         //ArrayType* ArrayTy = ArrayType::get(i8, 0);
@@ -948,9 +950,13 @@ class ArrayElem : public Lvalue {
 
 
     //if its an array first index needs to be c64(0). Does it?
-    if (isa<ArrayType>(array->llvm_type)) {
-      //arrayIndex.insert(arrayIndex.begin(), c64(0));
+    //TODO: reenabled it! make sure it doesnt break anything
+    //it breaks array.grc
+    //its weird but essentially we want to add a 0 in front only if its an array, not if its an array pointer
+    if (isa<ArrayType>(array->llvm_type) && array->array_size.size() == arrayIndex.size() ){
+      arrayIndex.insert(arrayIndex.begin(), c64(0));
     }
+
 
     std::clog << "Making gep, line:  " << line << std::endl;
     return Builder.CreateInBoundsGEP(array->llvm_type,array->var,arrayIndex,var->getName()+"_arrayElem_arg");
@@ -1889,7 +1895,27 @@ class LocalDefList : public Stmt {
   void add(Stmt *d) { localdef_list.push_back(d); }
 
   void sem() override{
-      for (Stmt *d : localdef_list) d->sem();
+      //variables need to be declared before functions
+      std::vector<Stmt*> vardec_list = {};
+      std::vector<Stmt*> stmt_list = {};
+
+      for (Stmt *d : localdef_list){
+          if(typeid(*d) == typeid(VarDec)){
+              vardec_list.push_back(d);
+          }
+          else{
+              stmt_list.push_back(d);
+          }
+      }
+
+      for (Stmt *d : vardec_list) {
+        d->sem();
+      }
+
+      for (Stmt *d : stmt_list) {
+          d->sem();
+      }
+
   }
   void printAST(std::ostream &out) const override {
     out << "LocalDefList(";
@@ -2086,16 +2112,19 @@ class BinOpCond : public Cond {
     Function *TheFunction = Builder.GetInsertBlock()->getParent();
 
     std::clog << "Compiling left"<< std::endl;
-    Value *leftValue = expr1->compile(thenBB,afterBB);
     std::clog << "Compiled left" <<std::endl;
     BasicBlock *evalRightBB = BasicBlock::Create(TheContext, "evalRight", TheFunction);
 
+    //TODO: write test cases to make sure its correct
     if(op == "and"){
+        Value *leftValue = expr1->compile(evalRightBB,afterBB);
+
 
         //if true and false -> evaluate left an
         Builder.CreateCondBr(leftValue, evalRightBB, afterBB);
     }
     else if(op == "or"){
+        Value *leftValue = expr1->compile(thenBB,evalRightBB);
 
         Builder.CreateCondBr(leftValue,thenBB,evalRightBB);
     }
@@ -2306,13 +2335,6 @@ class FuncCall : public Stmt, public Expr {
           sem_type = functionNode->type;
       }
 
-      //TODO: fix this funccall
-//      if(id == "chr"){
-//          sem_type = TYPE_char;
-//      }
-//      else
-//        sem_type = TYPE_int; //TODO: fix this and return based on func
-
   }
   Value* compile() override{
     std::clog << "Compiling function call: " << id << std::endl;
@@ -2322,13 +2344,14 @@ class FuncCall : public Stmt, public Expr {
 
     Node* functionNode = st.lookupNode(id, DECL_func);
 
+    std::deque<Expr *> exprlist = expr_list->getExprList();
     if(functionNode == nullptr){
-
+        //either doesnt exist or lib
 
 
     }else{
       //argslist
-      std::deque<Expr *> exprlist = expr_list->getExprList();
+
 
 
       std::clog << "Getting args" << std::endl;
@@ -2340,7 +2363,6 @@ class FuncCall : public Stmt, public Expr {
       int i = 0;
       for(auto &a : funcargs) {
         //if pointer compileAssign
-
         if(a->ref){
           //we need the array size
           args.push_back(exprlist[i]->compileAssign());
@@ -2352,17 +2374,15 @@ class FuncCall : public Stmt, public Expr {
         }else{
           args.push_back(exprlist[i]->compile());
         }
-
         i++;
-
       }
 
 
       //Here we pass extra args related to nesting
-
         for(auto &n : functionNode->extraArgNodes) {
-
-            args.push_back(n->realNode->var);
+            //TODO: maybe improve this!
+            args.push_back(st.lookupNode(n->name,DECL_var,true)->var);
+            //args.push_back(n->realNode->var);
         }
 
 
@@ -2387,12 +2407,33 @@ class FuncCall : public Stmt, public Expr {
         }
         FunctionDetails function = fun->second;
 
-        if(function.argPointer){
-            args = expr_list->compileAssignVector();
+//        std::vector<Bool> argsPointer = function.argsPointer;
+
+
+        int i = 0;
+        for(bool pointer : function.argsPointer) {
+            //if pointer compileAssign
+            if(pointer){
+                //we need the array size
+                args.push_back(exprlist[i]->compileAssign());
+
+//                std::clog << "Argument ref, name: "<< a->name << std::endl;
+
+                // std::vector<int> arr = exprlist[i]->getArraySize();
+                // std::clog << "Array size:!!!!!!!!  " << arr.size() << std::endl;
+            }else{
+                args.push_back(exprlist[i]->compile());
+            }
+            i++;
         }
-        else{
-            args = expr_list->compileVector();
-        }
+
+
+//        if(function.argPointer){
+//            args = expr_list->compileAssignVector();
+//        }
+//        else{
+//            args = expr_list->compileVector();
+//        }
 
         func = function.func;
 
@@ -2507,7 +2548,7 @@ class StringConst : public Lvalue {
     GlobalVariable *gv = new GlobalVariable(*TheModule,
                                                       strConstant->getType(),
                                                       false, //we dont trully want this as constant..
-                                                      GlobalValue::PrivateLinkage,
+                                                      GlobalValue::ExternalLinkage,
                                                       strConstant,
                                                       "str_const");
 
