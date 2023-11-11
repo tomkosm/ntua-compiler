@@ -19,8 +19,6 @@ enum DeclType { DECL_var, DECL_func };
 // };
 
 
-
-
 //already have it in ast.hpp
 
 struct FuncArg{
@@ -68,8 +66,6 @@ struct Node{
 
 
     std::vector<FuncArg *> funcargs; //for call?
-
-
     std::vector<Node *> extraArgNodes; //needed for nesting
     std::vector<Type*> argTypes;
 

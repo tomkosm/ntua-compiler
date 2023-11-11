@@ -33,6 +33,11 @@ enum DataType
 };
 
 
+struct Sem{
+    DataType type;
+    std::vector<int> array_size;
+};
+
 //needs to be able to see DataType
 #include "symbol.cpp"
 struct FunctionDetails {
@@ -131,7 +136,7 @@ class AST {
           {"writeString", {"writeString", void_type, {i8_ptr},TYPE_nothing,{true}}},
           {"readInteger", {"readInteger", i64, {},TYPE_int,{}}},
           {"readChar", {"readChar", i8, {},TYPE_char,{}}},
-          {"readString", {"readString", void_type, {i64,i8_ptr},TYPE_nothing,{false,true}}}, //TODO: fix, mix of pointer and non pointer arg
+          {"readString", {"readString", void_type, {i64,i8_ptr},TYPE_nothing,{false,true}}},
           {"ascii", {"ascii", i64, {i8},TYPE_int,{false}}},
           {"chr", {"chr", i8, {i64},TYPE_char,{false}}},
           {"strlen", {"strlen", i64, {i8_ptr},TYPE_int,{true}}},
@@ -182,9 +187,8 @@ class AST {
         }
     }
 
-//TODO: we probably need this!, figure out if better way? we cant just delete cause of dependencies, see
+
     for (BasicBlock* BB : EmptyBBs) {
-//        BB->eraseFromParent();
         Builder.SetInsertPoint(BB);
 
         Function *parentFunc = BB->getParent();
@@ -292,7 +296,7 @@ inline std::ostream &operator<<(std::ostream &out, const AST &ast) {
 class Expr : virtual public AST {
  public:
 
-    DataType sem_type;
+    Sem sem_struct;
     virtual Value* compileAssign() { std::clog << "Called Lvalue compileAssign!" << std::endl; return nullptr; }
     virtual std::vector<int> getArraySize() { std::clog << "Called default Lvalue getArraySize!" << std::endl; exit(2);}
 
@@ -303,19 +307,21 @@ class Expr : virtual public AST {
 
     void sem(){
         std::clog << "Empty sem" << std::endl;
-        sem_type = TYPE_nothing;
+        sem_struct.type = TYPE_nothing;
     }
 
-    void check_type(DataType t){
+    void check_type(DataType t,bool isArray=true){
         //TODO: needs to also check array/array size
         sem();
-        if(sem_type == TYPE_UNDEFINED_ERROR)
+        if(sem_struct.type == TYPE_UNDEFINED_ERROR)
             logError("Should never return TYPE_UNDEFINED_ERROR");
 
-        std::clog << "Check_TYPE " << sem_type << " " << t << std::endl;
+        std::clog << "Check_TYPE " << sem_struct.type << " " << t << std::endl;
         //      printAST(std::clog);
         //      std::clog << std::endl;
-        if(sem_type != t) logError("Type mismatch");
+
+        if(!isArray && sem_struct.array_size.size()>0) logError("Wasnt expecting array.");
+        if(sem_struct.type != t) logError("Type mismatch");
     }
 
 
@@ -420,6 +426,7 @@ class Stmt : virtual public AST {
   virtual bool isReturn(){return false;}
 
 
+
 //   virtual void execute() const = 0;
 };
 
@@ -511,8 +518,6 @@ class VarDec : public Stmt {
 
   void sem() override {
       //create the st entry
-
-
       for (auto id: id_list->getIds()) {
 
           std::clog << "VarDec" << std::endl;
@@ -520,13 +525,14 @@ class VarDec : public Stmt {
               //TODO: fix this! has issues with parent scope!
               //logError("Variable is already declared");
           }
-
           //check that there isnt another node with same name,type
           Node *idNode = new Node();
           idNode->name = id->getName();
           idNode->type = type->getType();
           idNode->decl_type = DECL_var;
           idNode->array_size = type->getSizes();
+
+          std::clog << "ARRAY SIZE: "<< idNode->array_size.size() << std::endl;
 
     //      idNode->var = gVar;
     //
@@ -611,7 +617,7 @@ class CharConst : public Expr {
     out << "CharConst(" << var << ")";
   }
   void sem() override{
-    sem_type = TYPE_char;
+      sem_struct.type = TYPE_char;
   }
 
   Value *compile() override {
@@ -633,7 +639,7 @@ class CharConstSpecial : public CharConst {
     out << "CharConstSpecial(" << escSeqToChar(var) << ")";
   }
   void sem() override{
-    sem_type = TYPE_char;
+      sem_struct.type = TYPE_char;
   }
   int escSeqToChar(std::string v) const
 {
@@ -688,6 +694,11 @@ class Lvalue : public Expr {
     virtual Value* compileAssign() { std::clog << "Called Lvalue compileAssign!" << std::endl; return nullptr; }
     virtual void updatelookup() {}
     virtual std::vector<Value *> getIndexes() {std::clog << "Called Lvalue getIndexes!" << std::endl; exit(2);}
+    virtual int depth(){
+        return 0;
+    }
+    virtual Lvalue* getLHS(){ logError("Lvalue getLHS should never be called");}
+    virtual void sem_arrayelem(){}
 
 };
 
@@ -716,16 +727,18 @@ class IdLval : public Lvalue {
 //     else if(!idNode->assigned)
 //         //TODO: make this work for ref too?
 //         logError("Error, tried to access a variable that isnt assigned");
-     else
-        sem_type = idNode->type;
+     else {
+        sem_struct.type = idNode->type;
+        sem_struct.array_size = idNode->array_size;
+        std::clog <<"CHECK array size: "<<sem_struct.array_size.size() << std::endl;
+     }
 
-     std::clog << sem_type << std::endl;
+     std::clog << sem_struct.type << std::endl;
      std::clog << "sem" << std::endl;
      node = idNode;
         //TODO: does this work for pointer? do we need new types?
           //
-
-      semAnalysis = true;
+     semAnalysis = true;
   }
 
   std::string getName() override {
@@ -838,16 +851,55 @@ class ArrayElem : public Lvalue {
     out << "ArrayElem(" << *var << ", " << *expr << ")";
   }
 
-  void sem() override{
-      //TODO: implement???
-      var->sem();
+  Lvalue *getLHS() override{
+      if(typeid(*var) != typeid(ArrayElem)){
+          return var;
+      }
+      else{
+          return var->getLHS();
+      }
 
-      expr->sem();
+  }
+    int depth() override{
+        return var->depth()+1;
+    }
+
+    void sem_arrayelem() override{
+        expr->sem();
+
+        std::clog << "Type: " <<expr->sem_struct.type << std::endl;
+        if(expr->sem_struct.type != TYPE_int)
+            logError("Index needs to be an int");
+
+        var->sem_arrayelem();
+    }
+  void sem() override{
+
 
       std::clog << "Array elem "<< std::endl;
 
-      //TODO?
-      sem_type = var->sem_type;
+      // this checks on every ArrayElem the index type. We need this since we run sem only for first ArrayElem
+      sem_arrayelem();
+
+      std::clog << "Depth: " << depth() << std::endl;
+
+      Lvalue *lhs = getLHS();
+
+
+      lhs->sem();
+
+      std::clog << "Name: " <<  lhs->getName() << std::endl;
+
+      std::clog << "Arr size: " <<  lhs->sem_struct.array_size.size() << std::endl;
+      //TODO: add checks on size dimension match?
+      if(lhs->sem_struct.array_size.size() == 0)
+          logError("LHS needs to be an array");
+
+      //if isFirstArrayDimUnbounded then we have 1 less on array_size, so add it.
+      if(lhs->sem_struct.array_size.size() + (int)lhs->compileArray()->isFirstArrayDimUnbounded != depth())
+          logError("Array indices need to match");
+
+      sem_struct.type = lhs->sem_struct.type;
 
       //TODO: check that array index is valid!
       //std::vector<Value*> arrayIndex = getIndexes();
@@ -957,6 +1009,8 @@ class ArrayElem : public Lvalue {
 
 
   int offset;
+
+
 };
 
 
@@ -974,13 +1028,18 @@ class Assign : public Stmt {
       var->sem();
 //      std::clog << var->sem_type << std::endl;
       expr->sem();
-      std::clog << var->sem_type << " and " << expr->sem_type << std::endl;
+      std::clog << var->sem_struct.type << " and " << expr->sem_struct.type << std::endl;
 
-      if(var->sem_type == TYPE_UNDEFINED_ERROR or expr->sem_type == TYPE_UNDEFINED_ERROR)
+      if(var->sem_struct.type == TYPE_UNDEFINED_ERROR or expr->sem_struct.type == TYPE_UNDEFINED_ERROR)
           logError("Should never return TYPE_UNDEFINED_ERROR");
 
-      if(var->sem_type != expr->sem_type) logError("Type mismatch...");
+      if(var->sem_struct.array_size.size()> 0 ||expr->sem_struct.array_size.size()> 0 )
+          logError("Cant assign from/to array.");
+
+      if(var->sem_struct.type != expr->sem_struct.type) logError("Type mismatch...");
       std::clog << "Assign check sem complete" << std::endl;
+
+
 
       var->updatelookup(); // in order to detect later if it has been assigned before use, a better name would be updateAssigned
 
@@ -1040,6 +1099,11 @@ class Return : public Stmt {
   void sem(){
       std::clog << "Return sem" << std::endl;
       expr->sem();
+
+
+      if(st.currentScope()->functionOwner->type != expr->sem_struct.type)
+          logError("Invalid return type ");
+
 
     //TODO: check that expr type matches function!
   }
@@ -1352,10 +1416,11 @@ class BinOp : public Expr {
 
   void sem() override{
       //we need both to be int
-      expr1->check_type(TYPE_int);
-      expr2->check_type(TYPE_int);
+      expr1->check_type(TYPE_int,false);
+      expr2->check_type(TYPE_int,false);
 
-      sem_type = TYPE_int;
+
+      sem_struct.type = TYPE_int;
   }
 
   Value* compile() override{
@@ -1402,7 +1467,7 @@ class UnaryOp : public Expr {
 
   void sem() override{
       expr1->check_type(TYPE_int);
-      sem_type = TYPE_int;
+      sem_struct.type = TYPE_int;
   }
 
   Value *compile() override{
@@ -1692,6 +1757,7 @@ class FunctionHeader : public Stmt {
       functionNode->decl_type = DECL_func;
       functionNode->isCompiled = false;
       functionNode->type = getReturnType();
+      functionNode->funcargs = getArgs();
 
       std::clog << "Function Node set" << std::endl;
       //functionNode->function = F;
@@ -1764,7 +1830,6 @@ class FunctionHeader : public Stmt {
     BasicBlock *BB = BasicBlock::Create(TheContext, Tid, F);
 
     fnode->function = F;
-    fnode->funcargs = getArgs();
     fnode->block = BB;
     fnode->isCompiled = true;
 
@@ -1901,8 +1966,8 @@ class LocalDefList : public Stmt {
 
 
 class FunctionDef : public Stmt {
- public:
-  bool firstFunction;//we set this to true on lexer for the main function
+public:
+    bool firstFunction;//we set this to true on lexer for the main function
 
   FunctionDef(FunctionHeader *h,LocalDefList *l,StmtList *s) : header(h),localdef_list(l),stmt_list(s),firstFunction(false) {}
   ~FunctionDef() {
@@ -1913,10 +1978,15 @@ class FunctionDef : public Stmt {
 
       DataType funRetType = header->getReturnType();
 
+      if(firstFunction && funRetType != TYPE_nothing )
+          logError("Main needs to have return type: nothing");
+
       if(funRetType != TYPE_nothing && !stmt_list->isReturn())
           logError("Function doesnt return");   //TODO: line shows the end of the function, check if thats what i want
 
-
+          //TODO: make this work
+//      if(!stmt_list->isReturn(funRetType))
+//          logError("Wrong return type");
 
       std::string funcName = header->getTid(); //funcname is Tid ?
 
@@ -2030,7 +2100,7 @@ class FunctionDef : public Stmt {
     StmtList *stmt_list;
 
     Node *functionNode;
-    
+
 
 };
 
@@ -2058,7 +2128,7 @@ class BinOpCond : public Cond {
       expr1->check_type(TYPE_bool);
       expr2->check_type(TYPE_bool);
 
-      sem_type = TYPE_bool;
+      sem_struct.type = TYPE_bool;
   }
 
   //after or else!
@@ -2116,10 +2186,10 @@ class CompareOp : public Cond {
       std::clog << "Sem CompareOp" << std::endl;
       //should have .type
 //      std::clog << "Type 1:" << expr1->sem_type << " Type 2: " << expr2->sem_type << std::endl;
-      if(expr1->sem_type != expr2->sem_type)
+      if(expr1->sem_struct.type != expr2->sem_struct.type)
           logError("Compare types dont match");
 
-      sem_type = TYPE_bool;
+      sem_struct.type = TYPE_bool;
 
   }
 
@@ -2174,7 +2244,7 @@ class UnaryOpCond : public Cond {
 
   void sem() override{
       expr1->check_type(TYPE_bool);
-      sem_type = TYPE_bool;
+      sem_struct.type = TYPE_bool;
 
 
   }
@@ -2282,18 +2352,39 @@ class FuncCall : public Stmt, public Expr {
       std::clog << "Func sem analysis" << std::endl;
       if(functionNode == nullptr)// if the function is not in Symbol Table or LIBRARY
       {
+          std::clog << "Didnt find" << std::endl;
+
           if (externalFuncMap.find(id) == externalFuncMap.end()) {
               logError("Function named: " + id + " hasnt been declared");
           } else {
               auto funcDetails = externalFuncMap.find(id);
               FunctionDetails function = funcDetails->second;
-              sem_type = function.returnType;
+              sem_struct.type = function.returnType;
           }
       }
-      else{
+      else {
           std::clog << "func type" << std::endl;
-          std::clog <<functionNode->type << std::endl;
-          sem_type = functionNode->type;
+          std::clog << functionNode->type << std::endl;
+          sem_struct.type = functionNode->type;
+
+
+          std::clog << "Func sem analysis2" << std::endl;
+
+          std::vector < FuncArg * > funcargs = functionNode->funcargs;
+
+          std::deque < Expr * > exprlist = expr_list->getExprList();
+
+          int i = 0;
+          for (auto &a: funcargs) {
+
+              //if pointer compileAssign
+              if (a->ref) {
+                  //TODO: figure out whats up with the warning below
+                  if (typeid(*exprlist[i]) != typeid(IdLval))
+                      logError("Argument needs to be IdLval cause its a pointer");
+              }
+              i++;
+          }
       }
 
   }
@@ -2319,7 +2410,7 @@ class FuncCall : public Stmt, public Expr {
       std::clog << "Getting args" << std::endl;
       std::vector<FuncArg *> funcargs = functionNode->funcargs;
 
-      std::clog << "Got args" << std::endl;
+
 
 
       int i = 0;
@@ -2443,7 +2534,7 @@ class IntConst : public Expr {
   }
 
   void sem() override{
-      sem_type = TYPE_int;
+      sem_struct.type = TYPE_int;
   }
 
   Value *compile() override {
@@ -2471,7 +2562,7 @@ class StringConst : public Lvalue {
     out << "StringConst(" << var << ")";
   }
   void sem() override{
-      sem_type = TYPE_charList;
+      sem_struct.type = TYPE_charList;
   }
 
   //TODO: make it work for the rest of the special chars  
