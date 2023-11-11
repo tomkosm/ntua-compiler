@@ -154,6 +154,18 @@ class SymbolTable{
         scope->nodes[std::make_tuple(node->name,decl_type)] = node;
     }
 
+
+    Node* lookupFunctionNode(std::string node_name){
+
+        if(current_scope->nodes.find(std::make_tuple(node_name,DECL_func)) != current_scope->nodes.end()){
+            Node* node = current_scope->nodes[std::make_tuple(node_name,DECL_func)];
+            return node;
+        }
+        else{
+            return nullptr;
+        }
+    }
+
     Node* lookupNode(std::string node_name, DeclType decl_type = DECL_var,bool enableParentScope = false,llvm::Type * llvm_type=nullptr){
         ScopeEntry *temp_scope = current_scope;
 
@@ -169,6 +181,7 @@ class SymbolTable{
         while(temp_scope != nullptr){
 
             std::clog << "Looking in scope " << temp_scope->name << std::endl;
+
             if(temp_scope->nodes.find(std::make_tuple(node_name,decl_type)) != temp_scope->nodes.end()){
                 std::clog << "Found node " << node_name << " in scope " << temp_scope->name << std::endl;
 
@@ -226,6 +239,10 @@ class SymbolTable{
                     return node;
                 }
             }
+//            else if(decl_type == DECL_func){
+//                //if its a function we only check current scope
+//                return nullptr;
+//            }
             std::clog << "Here"<< std::endl;
             std::clog << "node name: " << node_name << std::endl;
 

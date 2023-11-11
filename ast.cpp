@@ -6,15 +6,6 @@ std::unique_ptr<Module> AST::TheModule;
 std::unique_ptr<legacy::FunctionPassManager> AST::TheFPM;
 
 
-Function *AST::TheWriteInteger;
-Function *AST::TheWriteChar;
-Function *AST::TheWriteString;
-Function *AST::TheReadInteger;
-Function *AST::Thestrlen;
-Function *AST::Thestrcpy;
-Function *AST::Theascii;
-Function *AST::Thechr;
-
 
 Type *AST::i8;
 Type *AST::i8_ptr;

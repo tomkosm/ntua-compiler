@@ -6,11 +6,7 @@
 #include <map>
 #include <deque>
 
-
-
 #include <string>
-
-
 
 
 #include <llvm/IR/IRBuilder.h>
@@ -24,11 +20,6 @@
 
 using namespace llvm;
 
-
-
-
-//extern std::vector<int> rt_stack;
-
 void yyerror(const char *s,int line);
 extern int yylineno;
 
@@ -40,8 +31,6 @@ enum DataType
     TYPE_charList, //hidden
     TYPE_bool, //hidden
 };
-
-
 
 
 //needs to be able to see DataType
@@ -82,30 +71,33 @@ class AST {
 
     Type* getLlvmType(DataType dtype,std::vector<int> array_size={}){
 
-    Type *itype;
+        Type *itype;
 
-    if(dtype == TYPE_int)
-        itype =  Type::getInt64Ty(TheContext);
-    else if(dtype == TYPE_char)
-        itype = Type::getInt8Ty(TheContext);
-    else if(dtype == TYPE_nothing)
-        itype = Type::getVoidTy(TheContext);
-    else{
-        std::clog << "Error, couldnt find type!" << std::endl;
-        exit(2);
-    }
-    if(array_size.size() > 0){
-        std::reverse(array_size.begin(), array_size.end());
-        ArrayType* ArrayTy;
+        if(dtype == TYPE_int)
+            itype =  Type::getInt64Ty(TheContext);
+        else if(dtype == TYPE_char)
+            itype = Type::getInt8Ty(TheContext);
+        else if(dtype == TYPE_nothing)
+            itype = Type::getVoidTy(TheContext);
+        else if(dtype == TYPE_charList)
+            itype = i8_ptr;
 
-        for(auto size : array_size) {
-            ArrayTy = ArrayType::get(itype, size);
-            itype = ArrayTy;
+        else{
+            std::clog << "Error, couldnt find type!" << std::endl;
+            exit(2);
         }
-        std::clog << "Hereeee!!!!!!!" << std::endl;
+        if(array_size.size() > 0){
+            std::reverse(array_size.begin(), array_size.end());
+            ArrayType* ArrayTy;
 
-    }
-    return itype;
+            for(auto size : array_size) {
+                ArrayTy = ArrayType::get(itype, size);
+                itype = ArrayTy;
+            }
+            std::clog << "Hereeee!!!!!!!" << std::endl;
+
+        }
+        return itype;
   }
 
   void llvm_compile_and_dump(bool optimize=false) {
@@ -132,12 +124,6 @@ class AST {
     void_type = Type::getVoidTy(TheContext);
 
     i8_ptr = PointerType::get(i8, 0);
-//          struct FunctionDetails {
-//              std::string functionName;
-//              Type *returnType;
-//              std::vector<Type *> argTypes;
-//              Function::LinkageTypes linkage = Function::ExternalLinkage;  // Set default linkage here
-//          };
 
     externalFuncMap = {
           {"writeInteger", {"writeInteger", void_type, {i64},TYPE_nothing,{false}}},
@@ -226,14 +212,6 @@ class AST {
     std::clog << "Removed empty BBs!" << std::endl;
 
 
-    // Print the names of all basic blocks
-    // for (BasicBlock* BB : BasicBlocks) {
-    //     std::cout << "Basic Block Name: " << BB->getName().str() << std::endl;
-    // }
-
-
-
-
     Builder.SetInsertPoint(BB);
     Builder.CreateRet(c64(0));
 
@@ -267,24 +245,6 @@ class AST {
   static IRBuilder<> Builder;
   static std::unique_ptr<Module> TheModule;
   static std::unique_ptr<legacy::FunctionPassManager> TheFPM;
-
-  static Function *TheWriteInteger;
-
-  static Function *TheWriteChar;
-
-
-  static Function *TheWriteString;
-
-
-  static Function *TheReadInteger;
-
-  static Function *Thestrlen;
-
-  static Function *Thestrcpy;
-
-    static Function *Theascii;
-
-    static Function *Thechr;
 
     static Type *i8;
   static Type *i32;
@@ -677,12 +637,9 @@ class CharConstSpecial : public CharConst {
   }
   int escSeqToChar(std::string v) const
 {
-  
     int res;
     if (v[0] == '\\')
     {
-
-
         switch (v[1])
         {
         case 'n':
@@ -713,7 +670,6 @@ class CharConstSpecial : public CharConst {
     std::clog << "Called CharConstSpecial compile!" << std::endl;
 
     return c8(escSeqToChar(var));
-    //    return ConstantInt::get(i8, escSeqToChar(var));
   }
 
 
@@ -733,13 +689,8 @@ class Lvalue : public Expr {
     virtual void updatelookup() {}
     virtual std::vector<Value *> getIndexes() {std::clog << "Called Lvalue getIndexes!" << std::endl; exit(2);}
 
-//    DataType sem_type;
-
-//  public:
-//   virtual void execute() const = 0;
 };
 
-// IdLval for array is ArrayElem
 class IdLval : public Lvalue {
  public:
   IdLval(std::string *c) : var(*c), semAnalysis(false) {}
@@ -1047,11 +998,14 @@ class Assign : public Stmt {
     std::clog << "Variable name: "<< var->getName() << std::endl;
 
 
+    //order matters, we first do lhs
+    Value *lhs = var->compileAssign();
+
+
     Value *rhs = expr->compile();
 
 
 
-    Value *lhs = var->compileAssign();
 
 
     std::clog << "Compiled rhs" << std::endl;
@@ -1967,9 +1921,12 @@ class FunctionDef : public Stmt {
       std::string funcName = header->getTid(); //funcname is Tid ?
 
       //its possible that only header has been declared before
-      Node *node = st.lookupNode(funcName,DECL_func);//TODO: maybe do polymorphism?
-      if(node == nullptr)
+      functionNode = st.lookupFunctionNode(funcName);//TODO: maybe do polymorphism?
+      if(functionNode == nullptr) {
           header->sem();
+          functionNode = header->fnode;
+      }
+
 
       std::clog << "Scope Name!: " <<st.getName() << std::endl;
 
@@ -1999,14 +1956,14 @@ class FunctionDef : public Stmt {
     Function *F;
 
     std::clog << "FunctionDef funcname: " << funcName << std::endl;
-    Node *node = st.lookupNode(funcName,DECL_func);
+    //Node *node = st.lookupNode(funcName,DECL_func);
 
     std::clog << "Function def lookup complete" << std::endl;
 
-    if(node == nullptr) {
+    if(functionNode == nullptr) {
         logError("This shouldnt occur!");
     }
-    else if(!node->isCompiled){
+    else if(!functionNode->isCompiled){
       //if not declared
       std::clog << "About to compile header" << std::endl;
       header->compile();
@@ -2017,8 +1974,8 @@ class FunctionDef : public Stmt {
     else{
       std::clog << "Function: " << funcName << " already declared!" << std::endl;
       //if declared
-      F = node->function;
-      BB = node->block;
+      F = functionNode->function;
+      BB = functionNode->block;
     }
 
     
@@ -2071,6 +2028,8 @@ class FunctionDef : public Stmt {
     FunctionHeader *header;
     LocalDefList *localdef_list;
     StmtList *stmt_list;
+
+    Node *functionNode;
     
 
 };
@@ -2316,7 +2275,9 @@ class FuncCall : public Stmt, public Expr {
       expr_list->sem();
 
 
-      Node* functionNode = st.lookupNode(id, DECL_func);
+      functionNode = st.lookupNode(id, DECL_func);
+
+      std::clog << "Current Scope: " << st.currentScope()->name << std::endl;
 
       std::clog << "Func sem analysis" << std::endl;
       if(functionNode == nullptr)// if the function is not in Symbol Table or LIBRARY
@@ -2342,7 +2303,8 @@ class FuncCall : public Stmt, public Expr {
     // std::vector<Value*> args = expr_list->compileVector();
     std::vector<Value*> args;
 
-    Node* functionNode = st.lookupNode(id, DECL_func);
+    //we do this now in sem
+    //Node* functionNode = st.lookupNode(id, DECL_func);
 
     std::deque<Expr *> exprlist = expr_list->getExprList();
     if(functionNode == nullptr){
@@ -2444,8 +2406,9 @@ class FuncCall : public Stmt, public Expr {
 
     std::clog << "Function: " << " found" << std::endl;
 
-    
+
     Value *res = Builder.CreateCall(func, args);
+      std::clog << "Function: " << " found2" << std::endl;
 
 
     if(id == "readInteger" || id == "strlen" || id == "ascii"){
@@ -2466,7 +2429,9 @@ class FuncCall : public Stmt, public Expr {
  private:
   std::string id;
   ExprList *expr_list;
-  
+
+  Node* functionNode;
+
   int offset;
 };
 
@@ -2567,7 +2532,28 @@ class StringConst : public Lvalue {
     //return Builder.CreateLoad(strConstant->getType(),gvar, "str_const_load");
 
   }
+  Node* compileArray() override{
 
+
+      Value *val = compile();
+
+      Node *array =  new Node();
+
+      int size = static_cast<int>(var.size());
+
+
+      array->array_size = {size};
+      array->llvm_type = ArrayType::get(i8, size);
+      array->type = TYPE_charList;
+      array->var = val;
+      return array;
+  }
+    std::string getName() const { return "const_string"; }
+
+    std::vector<Value *> getIndexes() override{
+        std::vector<Value *> v = {}; //This is needed , its the base pointer for an array! , I think i added this smwhere else
+        return v;
+    }
   std::vector<int> getArraySize() override{
     std::vector<int> v;
     v.push_back(var.size());
