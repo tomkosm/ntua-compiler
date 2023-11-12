@@ -480,7 +480,7 @@ class TypeDef : public Stmt {
   TypeDef(DataType t, ArraySize *s): type(t), array_size(s) {}
 
   void sem() override{
-      //TODO:fill
+
       if(type == TYPE_UNDEFINED_ERROR){
           logError("Unexpected type error");
       }
@@ -491,7 +491,7 @@ class TypeDef : public Stmt {
   void printAST(std::ostream &out) const override {
     out << "TypeDef(" << type << ", " << *array_size << ")";
   }
-  //TODO: handle arrays
+
   DataType getType() const { return type; }
  
   std::vector<int> getSizes() const { return array_size->getSizes();}
@@ -521,10 +521,10 @@ class VarDec : public Stmt {
       for (auto id: id_list->getIds()) {
 
           std::clog << "VarDec" << std::endl;
-          if (st.lookupNode(id->getName(), DECL_var)) {
-              //TODO: fix this! has issues with parent scope!
-              //logError("Variable is already declared");
-          }
+          //we only want to lookup local scope?
+          if (st.lookupNodeLocal(id->getName(), DECL_var))
+              logError("Variable is already declared");
+
           //check that there isnt another node with same name,type
           Node *idNode = new Node();
           idNode->name = id->getName();
@@ -567,24 +567,12 @@ class VarDec : public Stmt {
     std::clog << "Array size: " << arraysizes.size() << std::endl;
 
 
-    //TODO: issues if multiple same name etc
     for(auto id : id_list->getIds()) {
       std::clog << "Compiling VarDec name: " << id->getName() << " Current scope: " << st.currentScope()->name << std::endl; 
 
-      // AllocaInst* allocaInst = Builder.CreateAlloca(i32, 0, id->getName());
-
       Node* node = st.lookupNode(id->getName(),DECL_var);
 
-
         AllocaInst* gVar = Builder.CreateAlloca(itype, nullptr, id->getName()+"_var");
-//      GlobalVariable *gVar = new llvm::GlobalVariable(
-//        *TheModule,
-//        itype,
-//        false, // isConstant
-//        GlobalValue::ExternalLinkage,
-//        Initializer, // Initializer
-//        id->getName()+"_var"
-//      );
 
       gVar->setAlignment(Align(8));
 
@@ -1995,7 +1983,7 @@ public:
       std::string funcName = header->getTid(); //funcname is Tid ?
 
       //its possible that only header has been declared before
-      functionNode = st.lookupFunctionNode(funcName);//TODO: maybe do polymorphism?
+      functionNode = st.lookupNodeLocal(funcName,DECL_func);//TODO: maybe do polymorphism?
       if(functionNode == nullptr) {
           header->sem();
           functionNode = header->fnode;

@@ -7,19 +7,8 @@
 #include <iostream>
 
 
-
-
 enum DeclType { DECL_var, DECL_func };
 
-//shared
-// enum DataType 
-// {   TYPE_int, 
-//     TYPE_char, 
-//     TYPE_nothing
-// };
-
-
-//already have it in ast.hpp
 
 struct FuncArg{
     bool ref;
@@ -31,7 +20,6 @@ struct FuncArg{
     std::vector<int> array_size;
 
 };
-
 
 
 
@@ -151,10 +139,10 @@ class SymbolTable{
     }
 
 
-    Node* lookupFunctionNode(std::string node_name){
+    Node* lookupNodeLocal(std::string node_name,DeclType decl_type = DECL_var){
 
-        if(current_scope->nodes.find(std::make_tuple(node_name,DECL_func)) != current_scope->nodes.end()){
-            Node* node = current_scope->nodes[std::make_tuple(node_name,DECL_func)];
+        if(current_scope->nodes.find(std::make_tuple(node_name,decl_type)) != current_scope->nodes.end()){
+            Node* node = current_scope->nodes[std::make_tuple(node_name,decl_type)];
             return node;
         }
         else{
