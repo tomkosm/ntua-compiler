@@ -444,7 +444,7 @@ class ArraySize : public Stmt {
   void sem() override {
       for( int s:array_list){
           if(s <= 0){
-              logError("Array size needs to be positive!");
+              logError("Array size needs to be >0!");
           }
       }
     //TODO: figure out what we need
@@ -722,7 +722,7 @@ class IdLval : public Lvalue {
       std::clog << "tt" << std::endl;
 
       if(idNode == nullptr)
-          logError("Cant find id in sem");
+          logError("Variable is not declared.");
       //TODO: we should do the below test only on access, check where getName is called?
 //     else if(!idNode->assigned)
 //         //TODO: make this work for ref too?
@@ -892,11 +892,13 @@ class ArrayElem : public Lvalue {
 
       std::clog << "Arr size: " <<  lhs->sem_struct.array_size.size() << std::endl;
       //TODO: add checks on size dimension match?
-      if(lhs->sem_struct.array_size.size() == 0)
+      int array_size = lhs->sem_struct.array_size.size() + (int)lhs->compileArray()->isFirstArrayDimUnbounded;
+
+      if(array_size == 0)
           logError("LHS needs to be an array");
 
       //if isFirstArrayDimUnbounded then we have 1 less on array_size, so add it.
-      if(lhs->sem_struct.array_size.size() + (int)lhs->compileArray()->isFirstArrayDimUnbounded != depth())
+      if(array_size != depth())
           logError("Array indices need to match");
 
       sem_struct.type = lhs->sem_struct.type;
@@ -1036,7 +1038,9 @@ class Assign : public Stmt {
       if(var->sem_struct.array_size.size()> 0 ||expr->sem_struct.array_size.size()> 0 )
           logError("Cant assign from/to array.");
 
-      if(var->sem_struct.type != expr->sem_struct.type) logError("Type mismatch...");
+      if(var->sem_struct.type != expr->sem_struct.type)
+          logError("Type mismatch...");
+
       std::clog << "Assign check sem complete" << std::endl;
 
 
@@ -1997,6 +2001,11 @@ public:
           functionNode = header->fnode;
       }
 
+      if(functionNode->isSet)
+          logError("This function is already defined!");
+
+      functionNode->isSet = true;
+
 
       std::clog << "Scope Name!: " <<st.getName() << std::endl;
 
@@ -2363,6 +2372,9 @@ class FuncCall : public Stmt, public Expr {
           }
       }
       else {
+          if(!functionNode->isSet)
+              logError("The function definition is missing");
+
           std::clog << "func type" << std::endl;
           std::clog << functionNode->type << std::endl;
           sem_struct.type = functionNode->type;
@@ -2374,15 +2386,26 @@ class FuncCall : public Stmt, public Expr {
 
           std::deque < Expr * > exprlist = expr_list->getExprList();
 
+          std::clog << funcargs.size() << std::endl;
+          std::clog << exprlist.size() << std::endl;
+
+          if(exprlist.size() != funcargs.size())
+              logError("Wrong number of arguments");
+
           int i = 0;
-          for (auto &a: funcargs) {
+          for (auto &expr: exprlist) {
 
               //if pointer compileAssign
-              if (a->ref) {
+              if (funcargs[i]->ref) {
                   //TODO: figure out whats up with the warning below
-                  if (typeid(*exprlist[i]) != typeid(IdLval))
+                  std::clog << "here" << std::endl;
+                  if (typeid(*expr) != typeid(IdLval))
                       logError("Argument needs to be IdLval cause its a pointer");
               }
+
+              if(expr->sem_struct.type != funcargs[i]->type)
+                  logError("Argument type mismatch");
+
               i++;
           }
       }
@@ -2414,18 +2437,18 @@ class FuncCall : public Stmt, public Expr {
 
 
       int i = 0;
-      for(auto &a : funcargs) {
+      for(auto &expr : exprlist) {
         //if pointer compileAssign
-        if(a->ref){
+        std::clog << "here" << std::endl;
+        if(funcargs[i]->ref){
           //we need the array size
-          args.push_back(exprlist[i]->compileAssign());
+            std::clog << "here2" << std::endl;
+            std::clog << "Argument ref, name: "<< funcargs[i]->name << std::endl;
+            std::clog << i << " " << exprlist.size() << " " << funcargs.size() << std::endl;
+            args.push_back(expr->compileAssign());
           
-          std::clog << "Argument ref, name: "<< a->name << std::endl;
-
-          // std::vector<int> arr = exprlist[i]->getArraySize();
-          // std::clog << "Array size:!!!!!!!!  " << arr.size() << std::endl;
         }else{
-          args.push_back(exprlist[i]->compile());
+            args.push_back(exprlist[i]->compile());
         }
         i++;
       }

@@ -215,7 +215,7 @@ class SymbolTable{
                         n->scope->functionOwner->extraArgNodes.push_back(n);
 
                         n->scope->functionOwner->argnodes->push_back(n);
-                        n->scope->functionOwner->funcargs.push_back(arg);
+//                        n->scope->functionOwner->funcargs.push_back(arg);
 
                         std::clog << "SymbolTable " << std::endl;
                         std::clog <<"SCOPE: " << n->scope->name << std::endl;
@@ -267,7 +267,7 @@ class SymbolTable{
 //                lastNode = arg;
 
                 std::clog << "testt" << std::endl;
-                std::clog << temp_scope->functionOwner->name << std::endl;
+//                std::clog << temp_scope->functionOwner->name << std::endl;
 
                 //temp_scope->functionOwner->argnodes->push_back(arg);
                 temp_argnodes.push_back(arg);
