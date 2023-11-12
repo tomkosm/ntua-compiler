@@ -17,6 +17,7 @@
 #include <llvm/Transforms/Scalar/GVN.h>
 #include <llvm/Transforms/Utils.h>
 
+
 using namespace llvm;
 
 void yyerror(const char *s, int line);
@@ -42,7 +43,7 @@ struct FunctionDetails {
   std::string functionName;
   Type *returnLLVMType;
   std::vector<Type *> argTypes;
-  //    bool argPointer;
+
   DataType returnType;
   std::vector<bool> argsPointer;
   Function::LinkageTypes linkage =
@@ -50,25 +51,35 @@ struct FunctionDetails {
   Function *func = nullptr;      // Pointer to the created function
 };
 
+
+inline char escSeqToChar(const std::string &v) {
+  if (v[0] != '\\' || v.size() < 2) {
+    return -1; // Indicates no valid escape sequence found
+  }
+  switch (v[1]) {
+  case 'n': return '\n';
+  case 't': return '\t';
+  case 'r': return '\r';
+  case '0': return '\0';
+  case '\\': return '\\';
+  case '\'': return '\'';
+  case '\"': return '\"';
+  case 'x':
+    if (v.size() >= 4) {
+      return std::stoi(v.substr(2, 2), nullptr, 16);
+    }
+    return -1; // Incomplete hex escape sequence
+  default: return -1; // Unrecognized escape sequence
+  }
+}
 class AST {
 public:
   AST() : line(yylineno) {}
   virtual ~AST() = default;
   virtual void printAST(std::ostream &out) const = 0;
-  virtual Value *compile() const {
-    std::clog << "Called ast const compile" << std::endl;
-    exit(2);
-    return nullptr;
-  }
-  virtual Value *compile() {
-    std::clog << "Called ast compile" << std::endl;
-    exit(2);
-    return nullptr;
-  }
-  virtual Node *compileArray() {
-    std::clog << "Called ast compilearray" << std::endl;
-    exit(2);
-  }
+  virtual Value *compile() const { logError("Called ast const compile"); }
+  virtual Value *compile() { logError("Called ast compile"); }
+  virtual Node *compileArray() { logError("Called ast compileArray"); }
   virtual void sem() { logError("Called default sem"); }
 
   std::string getName() {}
@@ -95,8 +106,7 @@ public:
       itype = i8_ptr;
 
     else {
-      std::clog << "Error, couldnt find type!" << std::endl;
-      exit(2);
+      logError("Error, couldnt find type!");
     }
     if (array_size.size() > 0) {
       std::reverse(array_size.begin(), array_size.end());
@@ -235,13 +245,13 @@ public:
     }
     std::clog << "Verified!" << std::endl;
 
-    // Optimize!
-    TheFPM->run(*main);
+    // optimize every function
+    for (auto &function : *TheModule) {
+      TheFPM->run(function);
+    }
 
-    // Print out the IR.
     TheModule->print(outs(), nullptr);
   }
-
 public:
   static SymbolTable st; // maybe some special class to do this?
 
@@ -271,7 +281,7 @@ protected:
   static ConstantInt *c64(int n) {
     return ConstantInt::get(TheContext, APInt(64, n, true));
   }
-  void logError(std::string msg) { yyerror(msg.c_str(), line); }
+  void logError(const std::string msg) const { yyerror(msg.c_str(), line); }
 };
 
 inline std::ostream &operator<<(std::ostream &out, DataType t) {
@@ -425,8 +435,6 @@ public:
   }
 
   virtual bool isReturn() { return false; }
-
-  //   virtual void execute() const = 0;
 };
 
 class ArraySize : public Stmt {
@@ -597,41 +605,7 @@ public:
     out << "CharConstSpecial(" << escSeqToChar(var) << ")";
   }
   void sem() override { sem_struct.type = TYPE_char; }
-  int escSeqToChar(std::string v) const {
-    int res;
-    if (v[0] == '\\') {
-      switch (v[1]) {
-      case 'n':
-        res = '\n';
-        break;
-      case 't':
-        res = '\t';
-        break;
-      case 'r':
-        res = '\r';
-        break;
-      case '0':
-        res = '\0';
-        break;
-      case '\\':
-        res = '\\';
-        break;
-      case '\'':
-        res = '\'';
-        break;
-      case '\"':
-        res = '\"';
-        break;
-      case 'x':
-        res = std::stoi(v.substr(2), nullptr, 16);
-        break;
-      default:
-        break;
-      }
 
-      return res;
-    }
-  }
   Value *compile() override {
     std::clog << "Called CharConstSpecial compile!" << std::endl;
 
@@ -716,7 +690,7 @@ public:
     std::clog << "COmpileAssign" << std::endl;
     std::clog << "Sem analysis done : " << semAnalysis << std::endl;
 
-    if (node == nullptr) {
+    if (node == nullptr)
       logError("Variable: " + var + " not declared");
 
       return node->var;
@@ -1575,7 +1549,7 @@ public:
         //              argTypes.push_back(PointerType::get(node->llvm_type,
         //              0));
         ////              node->llvm_type = PointerType::get(node->llvm_type,
-        ///0);
+        /// 0);
         //
         //          }else{
         //              argTypes.push_back(node->llvm_type);
@@ -2323,22 +2297,12 @@ public:
     std::string processString(const std::string &input) {
       std::string output;
       for (size_t i = 0; i < input.size(); ++i) {
-        if (input[i] == '\\') {
-          if (i + 1 < input.size()) {
-            switch (input[i + 1]) {
-            case 'n':
-              output.push_back('\n');
-              ++i; // Skip the next character
-              break;
-            // Add other escape sequences as needed...
-            case '\'':
-              output.push_back('\'');
-              i++;
-              break;
-            default:
-              output.push_back(input[i]);
-              break;
-            }
+        if (input[i] == '\\' && i + 1 < input.size()) {
+          // Handle potential escape sequences
+          int escapedChar = escSeqToChar(input.substr(i, (input[i + 1] == 'x' && i + 3 < input.size()) ? 4 : 2));
+          if (escapedChar != -1) {
+            output.push_back(static_cast<char>(escapedChar));
+            i += (input[i + 1] == 'x' && i + 3 < input.size()) ? 3 : 1; // Skip processed characters
           } else {
             output.push_back(input[i]);
           }
@@ -2346,6 +2310,7 @@ public:
           output.push_back(input[i]);
         }
       }
+
       return output;
     }
 
@@ -2364,15 +2329,7 @@ public:
 
       return gv;
     }
-    Value *compileAssign() override {
-
-      return compile();
-
-      // Value *gvar = compile();
-
-      // return Builder.CreateLoad(strConstant->getType(),gvar,
-      // "str_const_load");
-    }
+    Value *compileAssign() override { return compile(); }
     Node *compileArray() override {
 
       Value *val = compile();
