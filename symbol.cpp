@@ -14,6 +14,7 @@ struct FuncArg {
 
   DataType type;
   bool isArray;
+  bool isFirstArrayDimUnbounded;
 
   std::vector<int> array_size;
 };
@@ -257,9 +258,21 @@ public:
 
   ScopeEntry *currentScope() { return current_scope; }
 
+  void addFunctionNode(Node *fNode){
+    functionNodes.push_back(fNode);
+  }
+
+  std::vector<Node *> getFunctionNodes(){
+    return functionNodes;
+  }
+
 private:
   ScopeEntry *current_scope;
   std::map<std::string, ScopeEntry *> scopes;
+
+  //functionNodes
+
+  std::vector<Node *> functionNodes;
 };
 
 #endif

@@ -17,9 +17,13 @@
 #include <llvm/Transforms/Scalar/GVN.h>
 #include <llvm/Transforms/Utils.h>
 
+#include <llvm/Passes/OptimizationLevel.h>
+#include <llvm/Passes/PassBuilder.h>
+
 
 using namespace llvm;
 
+void yyerror(const char *s);
 void yyerror(const char *s, int line);
 extern int yylineno;
 
@@ -128,15 +132,15 @@ public:
     // Initialize
     TheModule = std::make_unique<Module>("Grace", TheContext);
 
-    TheFPM = std::make_unique<legacy::FunctionPassManager>(TheModule.get());
-    if (optimize) {
-      TheFPM->add(createPromoteMemoryToRegisterPass());
-      TheFPM->add(createInstructionCombiningPass());
-      TheFPM->add(createReassociatePass());
-      TheFPM->add(createGVNPass());
-      TheFPM->add(createCFGSimplificationPass());
-    }
-    TheFPM->doInitialization();
+//    TheFPM = std::make_unique<legacy::FunctionPassManager>(TheModule.get());
+//    if (optimize) {
+//      TheFPM->add(createPromoteMemoryToRegisterPass());
+//      TheFPM->add(createInstructionCombiningPass());
+//      TheFPM->add(createReassociatePass());
+//      TheFPM->add(createGVNPass());
+//      TheFPM->add(createCFGSimplificationPass());
+//    }
+//    TheFPM->doInitialization();
     // Initialize types
     i8 = IntegerType::get(TheContext, 8);
     i32 = IntegerType::get(TheContext, 32);
@@ -176,8 +180,19 @@ public:
 
     std::clog << "externalFuncMap size:" << externalFuncMap.size() << std::endl;
     std::clog << "About to start sem analysis" << std::endl;
+
     // do sem analysis
     sem();
+
+
+    //We also want to check that all functions that were declared were defined
+
+    std::vector<Node *> fNodes = st.getFunctionNodes();
+
+    for (Node *fNode : fNodes){
+      if(!fNode->isSet)
+        logError("The function definition is missing for function "+fNode->name,false);
+    }
 
     std::clog << "Sem analysis is now complete!" << std::endl;
 
@@ -245,13 +260,37 @@ public:
     }
     std::clog << "Verified!" << std::endl;
 
-    // optimize every function
-    for (auto &function : *TheModule) {
-      TheFPM->run(function);
+    if (optimize) {
+      LoopAnalysisManager LAM;
+      FunctionAnalysisManager FAM;
+      CGSCCAnalysisManager CGAM;
+      ModuleAnalysisManager MAM;
+
+      // Create the new pass manager builder.
+      // Take a look at the PassBuilder constructor parameters for more
+      // customization, e.g. specifying a TargetMachine or various debugging
+      // options.
+      PassBuilder PB;
+
+      // Register all the basic analyses with the managers.
+      PB.registerModuleAnalyses(MAM);
+      PB.registerCGSCCAnalyses(CGAM);
+      PB.registerFunctionAnalyses(FAM);
+      PB.registerLoopAnalyses(LAM);
+      PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+      // Create the pass manager.
+      // This one corresponds to a typical -O2 optimization pipeline.
+      ModulePassManager MPM =
+          PB.buildPerModuleDefaultPipeline(OptimizationLevel::O2);
+
+      // Optimize the IR!
+      MPM.run(*TheModule, MAM);
     }
 
     TheModule->print(outs(), nullptr);
   }
+
 public:
   static SymbolTable st; // maybe some special class to do this?
 
@@ -281,7 +320,12 @@ protected:
   static ConstantInt *c64(int n) {
     return ConstantInt::get(TheContext, APInt(64, n, true));
   }
-  void logError(const std::string msg) const { yyerror(msg.c_str(), line); }
+  void logError(const std::string msg,bool showLine=true) const {
+    if(showLine)
+      yyerror(msg.c_str(), line);
+    else
+      yyerror(msg.c_str());
+  }
 };
 
 inline std::ostream &operator<<(std::ostream &out, DataType t) {
@@ -325,6 +369,9 @@ public:
   virtual bool isEmpty() const {
     // we check if its Expr base class. If s then its empty
     return typeid(*this) == typeid(Expr);
+  }
+  virtual bool isArray(){
+    logError("Called default Expr isArray");
   }
 
   void sem() {
@@ -677,6 +724,13 @@ public:
     semAnalysis = true;
   }
 
+  bool isArray(){
+    if(node == nullptr)
+      logError("Need to first run sem");
+
+    return node->array_size.size() >0 || node->isFirstArrayDimUnbounded;
+  }
+
   std::string getName() override { return var; }
 
   void updatelookup() {
@@ -802,6 +856,8 @@ public:
 
       std::clog << "Arr size: " << lhs->sem_struct.array_size.size()
                 << std::endl;
+
+//      std::clog << "Type " << lhs->sem_struct.type << " " << lhs->sem_struct.array_size.size() << " " << lhs->compileArray()->isFirstArrayDimUnbounded << std::endl;
 
       int array_size = lhs->sem_struct.array_size.size() +
                        (int)lhs->compileArray()->isFirstArrayDimUnbounded;
@@ -1168,12 +1224,8 @@ public:
 
       Builder.SetInsertPoint(AfterBB);
 
-      // if(!stmt1->isReturn())
-      //   Builder.CreateBr(AfterBB);
 
-      //
-      //   Builder.CreateBr(AfterBB);
-      // Builder.SetInsertPoint(AfterBB);
+
 
       return nullptr;
     }
@@ -1355,6 +1407,9 @@ public:
 
     bool farraySizeEmpty() { return firstArraySizeEmpty; }
 
+    bool isArray(){
+      return getSizes().size() > 0 || farraySizeEmpty();
+    }
   private:
     bool firstArraySizeEmpty;
 
@@ -1375,9 +1430,16 @@ public:
     bool isArray() {
       //    return fpar_array->getSizes().size() != 0 ||
       //    fpar_array->farraySizeEmpty();
-      return !fpar_array
-                  ->farraySizeEmpty(); // We want to know if we want to handle
-                                       // it as llvm pointer or array
+
+      //Working but inaccurate
+      //      return !fpar_array
+//                  ->farraySizeEmpty(); // We want to know if we want to handle
+//                                       // it as llvm pointer or array
+      return fpar_array->isArray();
+
+    }
+    bool farraySizeEmpty(){
+      return fpar_array->farraySizeEmpty();
     }
 
     std::vector<int> getArraySizes() { return fpar_array->getSizes(); }
@@ -1423,6 +1485,7 @@ public:
         FuncArg *arg = new FuncArg();
         arg->type = fpar_type->getType();
         arg->isArray = fpar_type->isArray();
+        arg->isFirstArrayDimUnbounded = fpar_type->farraySizeEmpty();
         arg->array_size = fpar_type->getArraySizes();
         arg->name = id->getName();
 
@@ -1527,6 +1590,10 @@ public:
       for (FuncArg *arg : args) {
         // TODO: handle ref, pass as pointer
 
+        std::clog << arg->name << " Is array " << arg->isArray << " ref " << arg->ref <<std::endl;
+        if(arg->isArray && !arg->ref)
+          logError("Arrays need ref on definition.");
+
         Node *node = new Node();
         node->name = arg->name;
         node->decl_type = DECL_var;
@@ -1537,7 +1604,11 @@ public:
         node->assigned =
             true; // we do this since its arguments and the args are assigned
         node->isPointer = arg->ref;
-        node->isFirstArrayDimUnbounded = !arg->isArray; //
+
+//        if(node->array_size.size() >0 )
+
+        //isArray only checks first part
+        node->isFirstArrayDimUnbounded = arg->isFirstArrayDimUnbounded; //
         node->isSet = false;
 
         node->argTypes = argTypes;
@@ -1545,15 +1616,8 @@ public:
         argnodes.push_back(node);
         std::clog << "Arg node: " << node->name << "is ref: " << arg->ref
                   << "is array: " << arg->isArray << std::endl;
-        //          if(arg->ref){
-        //              argTypes.push_back(PointerType::get(node->llvm_type,
-        //              0));
-        ////              node->llvm_type = PointerType::get(node->llvm_type,
-        /// 0);
-        //
-        //          }else{
-        //              argTypes.push_back(node->llvm_type);
-        //          }
+
+
       }
 
       Node *functionNode = new Node();
@@ -1569,6 +1633,9 @@ public:
       // functionNode->block = BB;
 
       fnode = functionNode;
+
+      //we do this so we can check at the end if all were used
+      st.addFunctionNode(functionNode);
 
       st.insertNode(functionNode, DECL_func);
 
@@ -1756,6 +1823,9 @@ public:
 
       if (firstFunction && funRetType != TYPE_nothing)
         logError("Main needs to have return type: nothing");
+
+      if(firstFunction && header->getArgs().size() != 0)
+        logError("Main function cant have arguments.");
 
       if (funRetType != TYPE_nothing && !stmt_list->isReturn())
         logError(
@@ -2071,227 +2141,16 @@ public:
   private:
     std::deque<Expr *> expr_list;
   };
-
-  class FuncCall : public Stmt, public Expr {
-  public:
-    FuncCall(std::string *s, ExprList *e) : id(*s), expr_list(e) {}
-    ~FuncCall() { delete expr_list; }
-    void printAST(std::ostream &out) const override {
-      out << "FuncCall(" << id << ", " << *expr_list << ")";
-    }
-
-    void sem() override {
-      // TODO: implement this, we need to check that the arguments of the
-      // function have the correct types also add return type to type
-
-      expr_list->sem();
-
-      functionNode = st.lookupNode(id, DECL_func);
-
-      std::clog << "Current Scope: " << st.currentScope()->name << std::endl;
-
-      std::clog << "Func sem analysis" << std::endl;
-      if (functionNode ==
-          nullptr) // if the function is not in Symbol Table or LIBRARY
-      {
-        std::clog << "Didnt find" << std::endl;
-
-        if (externalFuncMap.find(id) == externalFuncMap.end()) {
-          logError("Function named: " + id + " hasnt been declared");
-        } else {
-          auto funcDetails = externalFuncMap.find(id);
-          FunctionDetails function = funcDetails->second;
-          sem_struct.type = function.returnType;
-        }
-      } else {
-        if (!functionNode->isSet)
-          logError("The function definition is missing");
-
-        std::clog << "func type" << std::endl;
-        std::clog << functionNode->type << std::endl;
-        sem_struct.type = functionNode->type;
-
-        std::clog << "Func sem analysis2" << std::endl;
-
-        std::vector<FuncArg *> funcargs = functionNode->funcargs;
-
-        std::deque<Expr *> exprlist = expr_list->getExprList();
-
-        std::clog << funcargs.size() << std::endl;
-        std::clog << exprlist.size() << std::endl;
-
-        if (exprlist.size() != funcargs.size())
-          logError("Wrong number of arguments");
-
-        int i = 0;
-        for (auto &expr : exprlist) {
-
-          // if pointer compileAssign
-          if (funcargs[i]->ref) {
-            // TODO: figure out whats up with the warning below
-            std::clog << "here" << std::endl;
-            if (typeid(*expr) != typeid(IdLval))
-              logError("Argument needs to be IdLval cause its a pointer");
-          }
-
-          if (expr->sem_struct.type != funcargs[i]->type)
-            logError("Argument type mismatch");
-
-          i++;
-        }
-      }
-    }
-    Value *compile() override {
-      std::clog << "Compiling function call: " << id << std::endl;
-
-      // std::vector<Value*> args = expr_list->compileVector();
-      std::vector<Value *> args;
-
-      // we do this now in sem
-      // Node* functionNode = st.lookupNode(id, DECL_func);
-
-      std::deque<Expr *> exprlist = expr_list->getExprList();
-      if (functionNode == nullptr) {
-        // either doesnt exist or lib
-
-      } else {
-        // argslist
-
-        std::clog << "Getting args" << std::endl;
-        std::vector<FuncArg *> funcargs = functionNode->funcargs;
-
-        int i = 0;
-        for (auto &expr : exprlist) {
-          // if pointer compileAssign
-          std::clog << "here" << std::endl;
-          if (funcargs[i]->ref) {
-            // we need the array size
-            std::clog << "here2" << std::endl;
-            std::clog << "Argument ref, name: " << funcargs[i]->name
-                      << std::endl;
-            std::clog << i << " " << exprlist.size() << " " << funcargs.size()
-                      << std::endl;
-            args.push_back(expr->compileAssign());
-
-          } else {
-            args.push_back(exprlist[i]->compile());
-          }
-          i++;
-        }
-
-        // Here we pass extra args related to nesting
-        for (auto &n : functionNode->extraArgNodes) {
-          // TODO: maybe improve this!
-          args.push_back(st.lookupNode(n->name, DECL_var, true)->var);
-          // args.push_back(n->realNode->var);
-        }
-      }
-
-      //
-      // std::clog << "Funccall!! : " << functionNode->funcargs.size() <<
-      // std::endl;
-
-      Function *func;
-
-      if (functionNode == nullptr) {
-
-        auto fun = externalFuncMap.find(id);
-
-        if (fun == externalFuncMap.end()) {
-          logError("Cant find externalFunc");
-        }
-        FunctionDetails function = fun->second;
-
-        //        std::vector<Bool> argsPointer = function.argsPointer;
-
-        int i = 0;
-        for (bool pointer : function.argsPointer) {
-          // if pointer compileAssign
-          if (pointer) {
-            // we need the array size
-            args.push_back(exprlist[i]->compileAssign());
-
-            //                std::clog << "Argument ref, name: "<< a->name <<
-            //                std::endl;
-
-            // std::vector<int> arr = exprlist[i]->getArraySize();
-            // std::clog << "Array size:!!!!!!!!  " << arr.size() << std::endl;
-          } else {
-            args.push_back(exprlist[i]->compile());
-          }
-          i++;
-        }
-
-        //        if(function.argPointer){
-        //            args = expr_list->compileAssignVector();
-        //        }
-        //        else{
-        //            args = expr_list->compileVector();
-        //        }
-
-        func = function.func;
-
-      } else {
-        func = functionNode->function;
-      }
-
-      std::clog << "Function: "
-                << " found" << std::endl;
-
-      Value *res = Builder.CreateCall(func, args);
-      std::clog << "Function: "
-                << " found2" << std::endl;
-
-      if (id == "readInteger" || id == "strlen" || id == "ascii") {
-
-        return Builder.CreateSExt(res, i64, "cast");
-        // return Builder.CreateTrunc(res, i32, "cast");
-        //  llvm::Value* truncatedValue = Builder.CreateTrunc(res,
-        //  Builder.getInt32Ty()); return Builder.CreateZExt(truncatedValue,
-        //  Builder.getInt64Ty());
-
-      } else {
-        return res;
-      }
-    }
-
-  private:
-    std::string id;
-    ExprList *expr_list;
-
-    Node *functionNode;
-
-    int offset;
-  };
-
-  class IntConst : public Expr {
-  public:
-    IntConst(int n) : num(n) {}
-    void printAST(std::ostream &out) const override {
-      out << "IntConst(" << num << ")";
-    }
-
-    void sem() override { sem_struct.type = TYPE_int; }
-
-    Value *compile() override {
-
-      std::clog << "Compiling expression: " << num << std::endl;
-      // return ConstantInt::get(TheContext, APInt(32, num));
-      // return ConstantInt::get(i32, num);
-      return ConstantInt::get(i64, num);
-    }
-
-  private:
-    int num;
-  };
-
   class StringConst : public Lvalue {
   public:
     StringConst(std::string *s) : var(*s) {}
     void printAST(std::ostream &out) const override {
       out << "StringConst(" << var << ")";
     }
-    void sem() override { sem_struct.type = TYPE_charList; }
+    void sem() override {
+      //TODO: charlist doesnt work, maybe get rid of it?
+      sem_struct.type = TYPE_char;
+    }
 
     // TODO: make it work for the rest of the special chars
     std::string processString(const std::string &input) {
@@ -2363,5 +2222,207 @@ public:
 
     Constant *strConstant;
   };
+
+  class FuncCall : public Stmt, public Expr {
+  public:
+    FuncCall(std::string *s, ExprList *e) : id(*s), expr_list(e) {}
+    ~FuncCall() { delete expr_list; }
+    void printAST(std::ostream &out) const override {
+      out << "FuncCall(" << id << ", " << *expr_list << ")";
+    }
+
+    void sem() override {
+      // TODO: implement this, we need to check that the arguments of the
+      // function have the correct types also add return type to type
+
+      expr_list->sem();
+
+      functionNode = st.lookupNode(id, DECL_func);
+
+      std::clog << "Current Scope: " << st.currentScope()->name << std::endl;
+
+      std::clog << "Func sem analysis" << std::endl;
+      if (functionNode ==
+          nullptr) // if the function is not in Symbol Table or LIBRARY
+      {
+        std::clog << "Didnt find" << std::endl;
+
+        if (externalFuncMap.find(id) == externalFuncMap.end()) {
+          logError("Function named: " + id + " hasnt been declared");
+        } else {
+          auto funcDetails = externalFuncMap.find(id);
+          FunctionDetails function = funcDetails->second;
+          sem_struct.type = function.returnType;
+        }
+      } else {
+
+        //TODO: this doesnt work. We need another way to check
+        //Maybe keep all function nodes somewhere and check at the end of sem
+//        if (!functionNode->isSet)
+//          logError("The function definition is missing");
+
+        std::clog << "func type" << std::endl;
+        std::clog << functionNode->type << std::endl;
+        sem_struct.type = functionNode->type;
+
+        std::clog << "Func sem analysis2" << std::endl;
+
+        std::vector<FuncArg *> funcargs = functionNode->funcargs;
+
+        std::deque<Expr *> exprlist = expr_list->getExprList();
+
+        std::clog << funcargs.size() << std::endl;
+        std::clog << exprlist.size() << std::endl;
+
+        if (exprlist.size() != funcargs.size())
+          logError("Wrong number of arguments");
+
+        int i = 0;
+        for (auto &expr : exprlist) {
+
+
+
+          if (funcargs[i]->ref) {
+            // TODO: figure out whats up with the warning below
+            std::clog << "here" << std::endl;
+            if (typeid(*expr) != typeid(IdLval) and typeid(*expr) != typeid(ArrayElem) and typeid(*expr) != typeid(StringConst))
+              logError("Argument needs to be IdLval or ArrayElem cause its a pointer");
+
+
+            //std::clog << "Is array arg: " << funcargs[i]->isArray << " Ar: "<< expr->isArray() << std::endl;
+
+            if(funcargs[i]->isArray &&  typeid(*expr) == typeid(IdLval) && !expr->isArray())
+              logError("Argument needs to be an array");
+          }
+          std::clog << expr->sem_struct.type << " " << funcargs[i]->type << std::endl;
+          if (expr->sem_struct.type != funcargs[i]->type)
+            logError("Argument type mismatch");
+
+          i++;
+        }
+      }
+    }
+    Value *compile() override {
+      std::clog << "Compiling function call: " << id << std::endl;
+
+      // std::vector<Value*> args = expr_list->compileVector();
+      std::vector<Value *> args;
+
+      // we do this now in sem
+      // Node* functionNode = st.lookupNode(id, DECL_func);
+
+      std::deque<Expr *> exprlist = expr_list->getExprList();
+      if (functionNode == nullptr) {
+        // either doesnt exist or lib
+
+      } else {
+        // argslist
+
+        std::clog << "Getting args" << std::endl;
+        std::vector<FuncArg *> funcargs = functionNode->funcargs;
+
+        int i = 0;
+        for (auto &expr : exprlist) {
+          // if pointer compileAssign
+          std::clog << "here" << std::endl;
+          if (funcargs[i]->ref) {
+            // we need the array size
+            std::clog << "here2" << std::endl;
+            std::clog << "Argument ref, name: " << funcargs[i]->name
+                      << std::endl;
+            std::clog << i << " " << exprlist.size() << " " << funcargs.size()
+                      << std::endl;
+            args.push_back(expr->compileAssign());
+
+          } else {
+            args.push_back(exprlist[i]->compile());
+          }
+          i++;
+        }
+
+        // Here we pass extra args related to nesting
+        for (auto &n : functionNode->extraArgNodes) {
+          // TODO: maybe improve this!
+          args.push_back(st.lookupNode(n->name, DECL_var, true)->var);
+          // args.push_back(n->realNode->var);
+        }
+      }
+
+      Function *func;
+
+      if (functionNode == nullptr) {
+
+        auto fun = externalFuncMap.find(id);
+
+        if (fun == externalFuncMap.end()) {
+          logError("Cant find externalFunc");
+        }
+        FunctionDetails function = fun->second;
+
+        //        std::vector<Bool> argsPointer = function.argsPointer;
+
+        int i = 0;
+        for (bool pointer : function.argsPointer) {
+          // if pointer compileAssign
+          if (pointer) {
+            // we need the array size
+            args.push_back(exprlist[i]->compileAssign());
+
+          } else {
+            args.push_back(exprlist[i]->compile());
+          }
+          i++;
+        }
+
+        func = function.func;
+
+      } else {
+        func = functionNode->function;
+      }
+
+      std::clog << "Function: "
+                << " found" << std::endl;
+
+      Value *res = Builder.CreateCall(func, args);
+      std::clog << "Function: "
+                << " found2" << std::endl;
+
+      if (id == "readInteger" || id == "strlen" || id == "ascii") {
+
+        return Builder.CreateSExt(res, i64, "cast");
+
+      } else {
+        return res;
+      }
+    }
+
+  private:
+    std::string id;
+    ExprList *expr_list;
+
+    Node *functionNode;
+
+    int offset;
+  };
+
+  class IntConst : public Expr {
+  public:
+    IntConst(int n) : num(n) {}
+    void printAST(std::ostream &out) const override {
+      out << "IntConst(" << num << ")";
+    }
+
+    void sem() override { sem_struct.type = TYPE_int; }
+
+    Value *compile() override {
+
+      std::clog << "Compiling expression: " << num << std::endl;
+      return ConstantInt::get(i64, num);
+    }
+
+  private:
+    int num;
+  };
+
 
 #endif
