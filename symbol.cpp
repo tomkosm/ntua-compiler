@@ -28,6 +28,9 @@ struct ScopeEntry {
   std::map<std::tuple<std::string, DeclType>, Node *> nodes;
 
   Node *functionOwner;
+
+  std::vector<ScopeEntry*> children; // New field to hold child scopes
+
 };
 
 struct Node {
@@ -83,33 +86,35 @@ public:
 
   ScopeEntry *getScope(std::string scope_name) { return scopes[scope_name]; }
 
-  void createScope(std::string scope_name, Node *functionOwner) { // types too?
-    // create and enters
+  void createScope(std::string scope_name, Node *functionOwner) {
     ScopeEntry *new_scope = new ScopeEntry;
     new_scope->name = scope_name;
     new_scope->functionOwner = functionOwner;
     new_scope->parent = current_scope;
 
-    current_scope = new_scope;
-
-    scopes[scope_name] = new_scope;
+    current_scope->children.push_back(new_scope); // Add new scope as a child
+    current_scope = new_scope; // Enter the new scope
   }
+
 
   std::string getName() { return current_scope->name; }
 
   void enterScope(std::string scope_name) {
-    // check if scope_name not in scopes
-    if (scopes.find(scope_name) == scopes.end()) {
-      std::clog << "Scope " << scope_name << " not found" << std::endl;
-      exit(2);
-      return;
+    // First, check if the current scope has a child with the given name
+    for (ScopeEntry* childScope : current_scope->children) {
+      if (childScope->name == scope_name) {
+        current_scope = childScope;
+        return;
+      }
     }
-    current_scope = scopes[scope_name];
+    // If no child scope with the given name is found, log an error
+    std::clog << "Scope '" << scope_name << "' not found within the current scope '" << current_scope->name << "'" << std::endl;
+    // Handle the error appropriately, possibly with an exception or an error code
   }
 
   void exitScope() {
     if (current_scope->parent == nullptr) {
-      std::clog << "Cannot exit global scope" << std::endl;
+      std::clog << "Cannot exit from the global scope" << std::endl;
       return;
     }
     current_scope = current_scope->parent;
@@ -209,10 +214,7 @@ public:
           return node;
         }
       }
-      //            else if(decl_type == DECL_func){
-      //                //if its a function we only check current scope
-      //                return nullptr;
-      //            }
+
       std::clog << "Here" << std::endl;
       std::clog << "node name: " << node_name << std::endl;
 
@@ -258,19 +260,15 @@ public:
 
   ScopeEntry *currentScope() { return current_scope; }
 
-  void addFunctionNode(Node *fNode){
-    functionNodes.push_back(fNode);
-  }
+  void addFunctionNode(Node *fNode) { functionNodes.push_back(fNode); }
 
-  std::vector<Node *> getFunctionNodes(){
-    return functionNodes;
-  }
+  std::vector<Node *> getFunctionNodes() { return functionNodes; }
 
 private:
   ScopeEntry *current_scope;
   std::map<std::string, ScopeEntry *> scopes;
 
-  //functionNodes
+  // functionNodes
 
   std::vector<Node *> functionNodes;
 };

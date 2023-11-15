@@ -1828,9 +1828,7 @@ public:
         logError("Main function cant have arguments.");
 
       if (funRetType != TYPE_nothing && !stmt_list->isReturn())
-        logError(
-            "Function doesnt return"); // TODO: line shows the end of the
-                                       // function, check if thats what i want
+        logError("Function doesnt return");
 
       // TODO: make this work
       //      if(!stmt_list->isReturn(funRetType))
@@ -2341,9 +2339,16 @@ public:
         }
 
         // Here we pass extra args related to nesting
+        std::clog << "Function name: " << functionNode->name << " " << "extraArgs " << functionNode->extraArgNodes.size() << std::endl;
         for (auto &n : functionNode->extraArgNodes) {
           // TODO: maybe improve this!
-          args.push_back(st.lookupNode(n->name, DECL_var, true)->var);
+          std::clog << "Looking for parm: " << n->name <<std::endl;
+          Node *arg = st.lookupNode(n->name, DECL_var, true);
+          Value *v = arg->var;
+//          if(arg->var == nullptr)
+//            v = arg->realNode->var;
+          std::clog << "res " << ((arg->var) == nullptr) << std::endl;
+          args.push_back(v);
           // args.push_back(n->realNode->var);
         }
       }
