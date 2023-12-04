@@ -3,31 +3,39 @@ MAKEFLAGS += -j4
 LLVMCONFIG=llvm-config
 
 CXX=clang++
-CXXFLAGS=-Wall -g `$(LLVMCONFIG) --cxxflags` -std=c++17
 LDFLAGS=`$(LLVMCONFIG) --ldflags --system-libs --libs all`
 
-default: gracec
+# Directories
+SRCDIR = src
+LEXERDIR = $(SRCDIR)/lexer
+PARSERDIR = $(SRCDIR)/parser
+ASTDIR = $(SRCDIR)/ast
+BUILDDIR = build
+BINDIR = bin
+CXXFLAGS=-Wall -g `$(LLVMCONFIG) --cxxflags` -std=c++17 -I$(SRCDIR) -I$(LEXERDIR) -I$(PARSERDIR) -I$(ASTDIR)
 
-lexer.cpp: lexer.l
-	flex -s -o lexer.cpp lexer.l
+VPATH = $(LEXERDIR):$(PARSERDIR):$(ASTDIR)
 
-lexer.o: lexer.cpp lexer.hpp parser.hpp ast.hpp
-	$(CXX) $(CXXFLAGS) -c -o lexer.o lexer.cpp 
+default: $(BINDIR)/gracec
 
-ast.o: ast.cpp ast.hpp symbol.cpp
-	$(CXX) $(CXXFLAGS) -c -o ast.o ast.cpp
+$(BUILDDIR)/lexer.cpp: $(LEXERDIR)/lexer.l
+	flex -s -o $@ $<
 
-parser.hpp parser.cpp: parser.y
-	bison -dv -o parser.cpp parser.y
+$(BUILDDIR)/lexer.o: $(BUILDDIR)/lexer.cpp $(LEXERDIR)/lexer.hpp $(BUILDDIR)/parser.hpp $(ASTDIR)/ast.hpp
+	$(CXX) $(CXXFLAGS) -c -o $@ $(BUILDDIR)/lexer.cpp
 
-parser.o: parser.cpp lexer.hpp ast.hpp
-	$(CXX) $(CXXFLAGS) -c -o parser.o parser.cpp 
- 
-gracec: lexer.o parser.o ast.o
-	$(CXX) $(CXXFLAGS) -o gracec $^ $(LDFLAGS)
+$(BUILDDIR)/ast.o: $(ASTDIR)/ast.cpp $(ASTDIR)/ast.hpp $(ASTDIR)/symbol.cpp
+	$(CXX) $(CXXFLAGS) -c -o $@ $(ASTDIR)/ast.cpp
 
+$(BUILDDIR)/parser.cpp $(BUILDDIR)/parser.hpp: $(PARSERDIR)/parser.y
+	bison -dv -o $(BUILDDIR)/parser.cpp $<
+
+$(BUILDDIR)/parser.o: $(BUILDDIR)/parser.cpp $(LEXERDIR)/lexer.hpp $(ASTDIR)/ast.hpp
+	$(CXX) $(CXXFLAGS) -c -o $@ $(BUILDDIR)/parser.cpp
+
+$(BINDIR)/gracec: $(BUILDDIR)/lexer.o $(BUILDDIR)/parser.o $(BUILDDIR)/ast.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 clean:
-	$(RM) lexer.cpp parser.cpp parser.hpp parser.output *.o *.s
-
+	$(RM) -r $(BUILDDIR)/*
 distclean: clean
-	$(RM) gracec a.out
+	$(RM) -r $(BINDIR)/*

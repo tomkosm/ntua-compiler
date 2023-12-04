@@ -1,7 +1,10 @@
 #!/bin/bash
 
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+BIN_DIR="$ROOT_DIR/bin"
 DOCKER_IMAGE="grace-compiler"
-DOCKERFILE_PATH="."
+DOCKERFILE_PATH="$ROOT_DIR"
 
 DEFAULT_RUNTIME="docker"
 
@@ -28,17 +31,18 @@ if ! image_exists "$DOCKER_IMAGE"; then
     $CONTAINER_RUNTIME build -t "$DOCKER_IMAGE" "$DOCKERFILE_PATH"
 fi
 
+GRACEC_PATH="$BIN_DIR/gracec"
 
-if [ -e "gracec" ]; then
+if [ -e "$GRACEC_PATH" ]; then
     echo "Removing existing 'gracec' file..."
-    rm "gracec"
+    rm "$GRACEC_PATH"
 fi
 
-echo "#!/bin/bash" > gracec
-echo "$CONTAINER_RUNTIME run -i $DOCKER_IMAGE ./gracec" >> gracec
-chmod +x gracec
+echo "#!/bin/bash" > "$GRACEC_PATH"
+echo "$CONTAINER_RUNTIME run -i $DOCKER_IMAGE ./gracec" >> "$GRACEC_PATH"
+chmod +x "$GRACEC_PATH"
 
-echo "The 'gracec' file has been created."
+echo "The 'gracec' file has been created in the bin directory."
 
 echo "Done."
 
