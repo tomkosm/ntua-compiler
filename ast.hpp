@@ -132,15 +132,6 @@ public:
     // Initialize
     TheModule = std::make_unique<Module>("Grace", TheContext);
 
-//    TheFPM = std::make_unique<legacy::FunctionPassManager>(TheModule.get());
-//    if (optimize) {
-//      TheFPM->add(createPromoteMemoryToRegisterPass());
-//      TheFPM->add(createInstructionCombiningPass());
-//      TheFPM->add(createReassociatePass());
-//      TheFPM->add(createGVNPass());
-//      TheFPM->add(createCFGSimplificationPass());
-//    }
-//    TheFPM->doInitialization();
     // Initialize types
     i8 = IntegerType::get(TheContext, 8);
     i32 = IntegerType::get(TheContext, 32);
@@ -266,10 +257,7 @@ public:
       CGSCCAnalysisManager CGAM;
       ModuleAnalysisManager MAM;
 
-      // Create the new pass manager builder.
-      // Take a look at the PassBuilder constructor parameters for more
-      // customization, e.g. specifying a TargetMachine or various debugging
-      // options.
+
       PassBuilder PB;
 
       // Register all the basic analyses with the managers.
@@ -380,14 +368,12 @@ public:
   }
 
   void check_type(DataType t, bool isArray = true) {
-    // TODO: needs to also check array/array size
+
     sem();
     if (sem_struct.type == TYPE_UNDEFINED_ERROR)
       logError("Should never return TYPE_UNDEFINED_ERROR");
 
     std::clog << "Check_TYPE " << sem_struct.type << " " << t << std::endl;
-    //      printAST(std::clog);
-    //      std::clog << std::endl;
 
     if (!isArray && sem_struct.array_size.size() > 0)
       logError("Wasnt expecting array.");
@@ -445,7 +431,6 @@ public:
     out << ")";
   }
 
-  // TODO: needs to return the type of each!
   std::vector<Id *> getIds() const {
 
     return std::vector<Id *>(id_list.begin(), id_list.end());
@@ -497,7 +482,6 @@ public:
         logError("Array size needs to be >0!");
       }
     }
-    // TODO: figure out what we need
   }
 
   void printAST(std::ostream &out) const override {
@@ -693,29 +677,30 @@ public:
 
   void sem() override {
 
-    // TODO: check offset too?
     std::clog << "Scope Name!: " << st.getName() << std::endl;
 
     std::clog << "Looking for id!: " << var << std::endl;
-    // we dont want this to run in vardec
 
     Node *idNode = st.lookupNode(var, DECL_var, true);
-    std::clog << "tt" << std::endl;
+
 
     if (idNode == nullptr)
       logError("Variable is not declared.");
 
     // TODO: we should do the below test only on access, check where getName is
     // called?
-    //     else if(!idNode->assigned)
-    //         //TODO: make this work for ref too?
-    //         logError("Error, tried to access a variable that isnt assigned");
-    else {
-      sem_struct.type = idNode->type;
-      sem_struct.array_size = idNode->array_size;
-      std::clog << "CHECK array size: " << sem_struct.array_size.size()
-                << std::endl;
-    }
+//   else if(!idNode->isPointer && !idNode->assigned)
+//       //TODO: make this work for ref too?
+//       logError("Error, tried to access a variable that isnt assigned");
+//  else if(idNode->isPointer && !idNode->realNode->assigned){
+//       logError("Error, tried to access a variable that isnt assigned");
+//  }
+
+
+    sem_struct.type = idNode->type;
+    sem_struct.array_size = idNode->array_size;
+    std::clog << "CHECK array size: " << sem_struct.array_size.size()
+              << std::endl;
 
     std::clog << sem_struct.type << std::endl;
     std::clog << "sem" << std::endl;
@@ -1029,9 +1014,7 @@ public:
       expr->sem();
 
       if (st.currentScope()->functionOwner->type != expr->sem_struct.type)
-        logError("Invalid return type ");
-
-      // TODO: check that expr type matches function!
+        logError("Wrong return type ");
     }
 
     bool isReturn() override { return true; }
@@ -1062,8 +1045,6 @@ public:
     void add(Stmt *s) { stmt_list.push_back(s); }
 
     void name() { std::clog << "StmtList name" << std::endl; }
-    // TODO: We need to check that the order of statements is correct! SUPER
-    // IMPORTANT!
 
     void sem() override {
       std::clog << "STMT Scope Name!: " << st.getName() << std::endl;
@@ -1356,7 +1337,7 @@ public:
     }
 
     void sem() override {
-      expr1->check_type(TYPE_int);
+      expr1->check_type(TYPE_int,false);
       sem_struct.type = TYPE_int;
     }
 
@@ -1585,11 +1566,7 @@ public:
 
       std::vector<FuncArg *> args = getArgs();
 
-      //      argTypes = {};
-
       for (FuncArg *arg : args) {
-        // TODO: handle ref, pass as pointer
-
         std::clog << arg->name << " Is array " << arg->isArray << " ref " << arg->ref <<std::endl;
         if(arg->isArray && !arg->ref)
           logError("Arrays need ref on definition.");
@@ -1690,13 +1667,9 @@ public:
       fnode->block = BB;
       fnode->isCompiled = true;
 
-      //    fnode = functionNode;
-
       Builder.SetInsertPoint(BB);
 
-      // get arguments
-      // TODO: double check the following!
-      unsigned Idx = 0;
+      int Idx = 0;
       for (auto &Arg : F->args()) {
         Arg.setName(argnodes[Idx]->name + "_funcarg");
 
@@ -1830,15 +1803,11 @@ public:
       if (funRetType != TYPE_nothing && !stmt_list->isReturn())
         logError("Function doesnt return");
 
-      // TODO: make this work
-      //      if(!stmt_list->isReturn(funRetType))
-      //          logError("Wrong return type");
-
       std::string funcName = header->getTid(); // funcname is Tid ?
 
       // its possible that only header has been declared before
       functionNode = st.lookupNodeLocal(
-          funcName, DECL_func); // TODO: maybe do polymorphism?
+          funcName, DECL_func);
       if (functionNode == nullptr) {
         header->sem();
         functionNode = header->fnode;
@@ -1949,7 +1918,6 @@ public:
     }
 
     void sem() override {
-      // TODO: check maybe if its cond? or change type?
       std::clog << "Checking BinOpCond" << std::endl;
       expr1->check_type(TYPE_bool);
       expr2->check_type(TYPE_bool);
@@ -1970,7 +1938,6 @@ public:
       BasicBlock *evalRightBB =
           BasicBlock::Create(TheContext, "evalRight", TheFunction);
 
-      // TODO: write test cases to make sure its correct
       if (op == "and") {
         Value *leftValue = expr1->compile(evalRightBB, afterBB);
 
@@ -2006,14 +1973,11 @@ public:
     }
 
     void sem() override {
-      // TODO: also check if array?
 
       expr1->sem();
       expr2->sem();
       std::clog << "Sem CompareOp" << std::endl;
-      // should have .type
-      //      std::clog << "Type 1:" << expr1->sem_type << " Type 2: " <<
-      //      expr2->sem_type << std::endl;
+
       if (expr1->sem_struct.type != expr2->sem_struct.type)
         logError("Compare types dont match");
 
@@ -2025,7 +1989,6 @@ public:
       Value *val1 = expr1->compile();
       Value *val2 = expr2->compile();
 
-      // TODO: support arrays ??
       if (op == "<") {
         return Builder.CreateICmpSLT(val1, val2, "cmplt");
       } else if (op == "<=") {
@@ -2146,8 +2109,9 @@ public:
       out << "StringConst(" << var << ")";
     }
     void sem() override {
-      //TODO: charlist doesnt work, maybe get rid of it?
+
       sem_struct.type = TYPE_char;
+      sem_struct.array_size = {static_cast<int>(var.size())};
     }
 
     // TODO: make it work for the rest of the special chars
@@ -2253,11 +2217,6 @@ public:
           sem_struct.type = function.returnType;
         }
       } else {
-
-        //TODO: this doesnt work. We need another way to check
-        //Maybe keep all function nodes somewhere and check at the end of sem
-//        if (!functionNode->isSet)
-//          logError("The function definition is missing");
 
         std::clog << "func type" << std::endl;
         std::clog << functionNode->type << std::endl;

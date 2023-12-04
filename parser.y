@@ -312,14 +312,12 @@ cond :
 
 extern int yylineno;
 void yyerror(const char *msg) {
-  //printf("Error on line %d: ", line);
-  printf("Syntax error: %s\n", msg);
-  exit(42);
+  printf("Error: %s\n", msg);
+  exit(2);
 }
 void yyerror(const char *msg,int line) {
-  printf("Error on line %d: ", line);
-  printf("Syntax error: %s\n", msg);
-  exit(42);
+  printf("Error on line %d: %s\n", line,msg);
+  exit(2);
 }
 
 int main(int argc, char** argv) {
