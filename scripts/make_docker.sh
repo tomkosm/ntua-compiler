@@ -39,7 +39,7 @@ if [ -e "$GRACEC_PATH" ]; then
 fi
 
 echo "#!/bin/bash" > "$GRACEC_PATH"
-echo "$CONTAINER_RUNTIME run -i $DOCKER_IMAGE ./gracec" >> "$GRACEC_PATH"
+echo "$CONTAINER_RUNTIME run -i $DOCKER_IMAGE ./bin/gracec" >> "$GRACEC_PATH"
 chmod +x "$GRACEC_PATH"
 
 echo "The 'gracec' file has been created in the bin directory."
